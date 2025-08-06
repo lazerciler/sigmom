@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 ./
 ├── .env
 ├── .env.local
@@ -76,3 +77,83 @@
 └── scripts/
     ├── generate_timestamp.py
     └── zip_logger_backup.py
+=======
+./
+├── .env
+├── .env.local
+├── .gitignore
+├── README.md
+├── alembic.ini
+├── requirements.txt
+├── app/
+│   ├── __init__.py
+│   ├── config.py
+│   ├── database.py
+│   ├── main.py
+│   ├── models-old.py
+│   ├── models.py
+│   ├── schemas.py
+│   ├── exchanges/
+│   │   └── binance_futures_testnet/
+│   │       ├── __init__.py
+│   │       ├── account.py
+│   │       ├── order_handler.py
+│   │       ├── positions.py
+│   │       ├── router.py
+│   │       ├── settings.py
+│   │       ├── sync.py
+│   │       └── utils.py
+│   ├── handlers/
+│   │   ├── __init__.py
+│   │   └── signal_handler.py
+│   ├── routers/
+│   │   ├── __init__.py
+│   │   ├── dashboard.py
+│   │   └── webhook_router.py
+│   ├── services/
+│   │   └── __init__.py
+│   ├── static/
+│   │   └── favicon.ico
+│   ├── templates/
+│   └── utils/
+│       ├── __init__.py
+│       ├── exchange_loader.py
+│       ├── generate_hash.py
+│       ├── position_utils.py
+│       └── signing.py
+├── crud/
+│   ├── __init__.py
+│   ├── raw_signal.py
+│   └── trade.py
+├── docs/
+├── logs/
+├── migrations/
+│   ├── README
+│   ├── env.py
+│   ├── script.py.mako
+│   └── versions/
+│       ├── 024d7df44a14_add_response_data_to_strategy_tables.py
+│       ├── 076a03bc40b9_rebuild_models_with_verification_fields.py
+│       ├── 07f065ceb75c_add_fund_manager_id_to_strategy_tables.py
+│       ├── 0c89bc61535f_revise_models_py.py
+│       ├── 1160387fe8a3_add_pending_verification_fields_and_.py
+│       ├── 1a48d99bcb71_rename_pnl_to_realized_pnl_in_strategy_.py
+│       ├── 1f1d2fb58a3b_add_exchange_column_to_strategy_tables.py
+│       ├── 20a331d96d22_your_next_change.py
+│       ├── 3eb8b25f3944_your_next_change.py
+│       ├── 541fa9870fda_increase_exchange_field_length.py
+│       ├── b28b0c0848ea_replace_order_id_with_raw_signal_id.py
+│       ├── ba36e1f88c74_add_verification_fields_to_strategy_.py
+│       ├── db533d7c9dfa_add_open_trade_public_id_to_.py
+│       ├── ef846562f771_add_leverage_to_strategy_trades.py
+│       └── efc05fe65026_increase_exchange_field_length.py
+├── schema/
+│   ├── project_skeleton.txt
+│   ├── json/
+│   │   └── received_json.txt
+│   └── sql/
+│       └── deploy_all_first_time_version.sql
+└── scripts/
+    ├── generate_timestamp.py
+    └── zip_logger_backup.py
+>>>>>>> 00e04fd (README.md güncellendi)
