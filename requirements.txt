@@ -1,0 +1,30 @@
+# === Web framework ve sunucu ===
+fastapi>=0.95.1              # FastAPI 0.95.x Pydantic v1 ile uyumlu, stabil tercih
+uvicorn[standard]>=0.23.2    # ASGI sunucusu, yeniden başlatma, statik servis desteği
+
+# === ORM ve Veritabanı bağlantısı ===
+SQLAlchemy>=1.4              # ORM katmanı (1.4.x: async destekli yapı)
+aiomysql>=0.0.20             # async MySQL istemcisi (Windows uyumlu, test ve prod için tercih ediliyor)
+
+# === Ortam değişkenleri ve ayarlar ===
+python-dotenv>=1.0.0         # .env dosyasından config verisi okumak için kullanılıyor
+
+# === Veri modelleme ve doğrulama ===
+pydantic<2.0                 # FastAPI 0.95.x Pydantic v1 API'si ile çalışır
+# DİKKAT: Pydantic 2.0+ ile uyumlu değil. Güncelleme için model_dump(), model_validate() gibi yapılar gerekir
+
+# === HTTP istemcileri (API bağlantıları için) ===
+aiohttp>=3.9.0               # Binance/MEXC async API'ler ile bağlantı için aktif kullanımda
+httpx>=0.24.0                # Alternatif async HTTP istemcisi (şu an opsiyonel ama esnek)
+
+# === HTML şablon motoru (dashboard görünümü) ===
+jinja2>=3.1.2                # FastAPI ile HTML render için kullanılıyor
+
+# === Opsiyonel: DB migration aracı ===
+alembic>=1.10                # SQLAlchemy migration için (aktif kullanımda değilse yorum satırı yapılabilir)
+
+# === Alternatif ama kullanılmayan istemci ===
+# asyncmy>=0.3.2             # MySQL için hızlı client ama Windows uyumsuz — şimdilik devre dışı
+
+# pytest-asyncio>=1.1.0
+# pytest-cov>=4.1.0
