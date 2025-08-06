@@ -23,4 +23,3 @@ Daha fazla bilgi için kod ve dosya yapısını inceleyin.
 
 Katkı
 Katkıda bulunmak için lütfen bir pull request açın.
-
