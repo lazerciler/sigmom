@@ -16,10 +16,12 @@ SCHEMA_DIR = os.path.join(PROJECT_ROOT, "schema")
 SKELETON_PATH = os.path.join(SCHEMA_DIR, "project_skeleton.txt")
 HASH_LOG = os.path.join(BACKUP_DIR, "hash_log.txt")
 
-# Yedeklenecek dosya uzantıları (ini eklendi)
-INCLUDE_EXTENSIONS = {".py", ".sql", ".txt", ".md", ".env", ".env.example", ".ini"}
-EXCLUDE_DIRS = {"__pycache__", ".git", ".idea", "venv", os.path.basename(BACKUP_DIR)}
-EXCLUDE_FILES = {".DS_Store", ".env.local"}
+# Yedeklenecek dosya uzantıları
+INCLUDE_EXTENSIONS = {".py", ".sql", ".txt", ".md", ".example", ".ini", ".mako"}
+# Yedeklenmeyecek klasörler
+EXCLUDE_DIRS = {"__pycache__", ".git", ".idea", "scripts", "venv", os.path.basename(BACKUP_DIR)}
+# Yedeklenmeyecek dosyalar
+EXCLUDE_FILES = {".DS_Store", ".env"}
 
 # === Yardımcı Fonksiyonlar ===
 def get_file_hash(filepath: str) -> str:

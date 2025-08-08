@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # app/exchanges/binance_futures_testnet/utils.py
-
+# Python 3.9
 import logging
 import httpx
 import hmac
@@ -26,7 +26,7 @@ async def set_leverage(symbol: str, leverage: int) -> dict:
         "symbol": symbol,
         "leverage": leverage,
         "timestamp": timestamp,
-        "recvWindow": 5000,
+        "recvWindow": 7000,
     }
     # Imzalı query string oluştur
     query = urlencode(sorted(params.items()))
