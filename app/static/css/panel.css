@@ -1,0 +1,104 @@
+:root {
+  --bg: #0b0e15; --fg: #e7e9ee; --muted:#9aa3b2;
+  --card:#111624; --line:#1c2335; --primary:#4a7dff; --warn:#ffb020; --info:#2ca9bc;
+  --good:#2bb673; --neutral:#64748b;
+}
+* { box-sizing: border-box; }
+html { font-size: clamp(12px, 1.1vw, 14px); }
+html,body { height:100%; }
+body {
+  margin:0; background:var(--bg); color:var(--fg);
+  font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+}
+a { color: var(--primary); text-decoration: none; }
+.topbar {
+  height:56px; display:flex; align-items:center; justify-content:space-between;
+  padding:0 16px; border-bottom:1px solid var(--line); background:#0e1220;
+  position: sticky; top:0; z-index:10;
+}
+.brand { display:flex; gap:8px; align-items:center; font-weight:600; }
+.logo { width:24px; height:24px; }
+.actions { display:flex; gap:8px; align-items:center; }
+.btn {
+  display:inline-flex; align-items:center; gap:8px; padding:8px 12px; border-radius:8px; border:1px solid transparent; cursor:pointer;
+}
+.btn.primary { background:var(--primary); color:white; }
+.btn.ghost { border-color:var(--line); color:var(--fg); background:transparent; }
+.btn.link { background:transparent; color:var(--primary); padding:0; border:none; }
+.banner {
+  padding:10px 16px; border-bottom:1px solid var(--line); display:flex; gap:8px; align-items:center;
+}
+.banner.warning { background:#1f1400; color:#ffd793; border-color:#4b2e00; }
+.banner.info { background:#00191d; color:#97dde7; border-color:#003b42; }
+.grid {
+  display:grid; grid-template-columns: 1fr 320px; gap:16px; padding:16px; max-width:1400px; margin:0 auto;
+}
+.card {
+  background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.25);
+}
+.card-head h2 { font-size: clamp(14px, 1.4vw, 16px); }
+.card-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+.card-head h2 { margin:0; font-size:16px; font-weight:600; }
+.chart { height:520px; }
+.card-foot { color:var(--muted); border-top:1px solid var(--line); margin-top:8px; padding-top:8px; }
+.side h3 { margin:8px 0; }
+.kv { list-style:none; padding:0; margin:0; }
+.kv li { display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px dashed var(--line); }
+.kv li span { color:var(--muted); }
+.pill-group { display:flex; gap:8px; align-items:center; }
+.pill {
+  display:inline-flex; padding:4px 8px; border-radius:999px; border:1px solid var(--line); color:var(--muted);
+}
+.pill.neutral { color:#cbd5e1; }
+
+dialog { border:none; border-radius:12px; padding:0; background:var(--card); color:var(--fg); width:360px; }
+.ref-form { padding:16px; display:flex; flex-direction:column; gap:12px; }
+.ref-form input {
+  background:#0f1424; border:1px solid var(--line); border-radius:8px; padding:10px 12px; color:var(--fg);
+}
+.modal-actions { display:flex; justify-content:flex-end; gap:8px; }
+.form-msg { min-height:18px; color:#ffd793; }
+
+@media (max-width: 980px) {
+  .grid { grid-template-columns: 1fr; }
+  .chart { height:420px; }
+}
+
+/* Tablet ve altı */
+@media (max-width: 980px) {
+  .grid { grid-template-columns: 1fr; gap: 12px; padding: 12px; }
+  .chart { height: 60vh; }            /* mobilde daha yüksek grafik */
+  .topbar { padding: 0 12px; }
+  .actions .btn { padding: 8px 10px; }
+  .card { border-radius: 10px; }
+  .card-head h2 { font-size: 15px; }
+}
+
+/* Küçük telefonlar */
+@media (max-width: 720px) {
+  body { font-size: 13px; }
+  .topbar { height: 52px; }
+  .brand span { font-size: 14px; }
+  .pill-group { gap: 6px; }
+  .pill { padding: 3px 6px; font-size: 12px; }
+  .kv li { padding: 5px 0; }
+}
+
+/* Çok küçük telefonlar (narrow) */
+@media (max-width: 480px) {
+  .grid { padding: 8px; gap: 10px; }
+  .topbar { padding: 0 8px; }
+  .actions { gap: 6px; }
+  .btn.primary { padding: 8px 10px; }
+  .chart { height: 65vh; }            /* ekranın büyük kısmını grafiğe ver */
+  .side { padding: 10px; }
+  .card-head { align-items: flex-start; }
+  .card-head h2 { font-size: 14px; }
+  .banner { padding: 8px 10px; }
+}
+
+@media (max-width: 480px) {
+  /* Sağ üstteki ikinci pili gizle, sadeleştir */
+  .pill-group .pill:nth-child(2) { display: none; }
+}

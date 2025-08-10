@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # app/exchanges/binance_futures_testnet/settings.py
-
+# Python 3.9
 from app.config import settings
 
 EXCHANGE_NAME = "binance_futures_testnet"

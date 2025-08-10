@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Admin • Referans Yönetimi</title>
+
+  <!-- Dark mode: sayfa boyanmadan önce doğru tema -->
+  <script>
+    (function () {
+      var t = localStorage.getItem('theme');
+      var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+      if (t === 'dark' || (!t && prefersDark)) {
+        document.documentElement.classList.add('dark');
+      }
+    })();
+  </script>
+  <!-- Tailwind CDN: dark'ı class ile kullan -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class'
+    }
+    // Sayfa yüklenmeden önce tema uygula
+    if (localStorage.getItem('theme') === 'dark') {
+      document.documentElement.classList.add('dark');
+  }
+  </script>
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+</head>
+
+<body class="bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-100">
+  <main class="max-w-5xl mx-auto p-6 space-y-8">
+
+    <!-- Başlık -->
+    <header class="px-6 py-4 border-b bg-white dark:bg-slate-800 dark:border-slate-700 flex items-center justify-between rounded-xl">
+      <div>
+        <h1 class="text-2xl font-semibold">Referans Yönetimi</h1>
+        <p class="text-sm text-slate-500 dark:text-slate-400">
+          Kodlar veritabanında <em>hash</em> olarak saklanır; plaintext yalnızca indirilen dosyada bulunur.
+        </p>
+      </div>
+      <button id="themeToggle"
+              class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700">
+        🌙 / ☀️
+      </button>
+    </header>
+
+    <!-- 1) Kullanıcıya kod bağla -->
+    <section class="bg-white dark:bg-slate-800 rounded-xl shadow p-5">
+      <h2 class="font-medium text-lg mb-4">Kullanıcıya Kod Bağla</h2>
+
+      <form id="assign-form"
+      hx-post="/admin/referrals/assign"
+      hx-target="body" hx-swap="innerHTML"
+      hx-disabled-elt="#assign-submit"
+      hx-on::responseError="window.handleAssignError(event)"
+      class="grid gap-4 md:grid-cols-4">
+
+        <label class="block">
+          <span class="text-sm text-slate-600 dark:text-slate-300">Kullanıcı e-postası</span>
+          <input type="email" name="email" required
+                 class="mt-1 w-full h-10 px-3 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700">
+        </label>
+
+        <label class="block">
+          <span class="text-sm text-slate-600 dark:text-slate-300">Boştaki kod (ID)</span>
+
+          <select name="referral_id" required
+                  class="mt-1 w-full h-10 px-3 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700 bg-white dark:bg-slate-700">
+
+            <option value="">— seç —</option>
+            {% for c in free_codes %}<option value="{{ c.id }}">#{{ c.id }}</option>{% endfor %}
+          </select>
+        </label>
+
+        <label class="block md:col-span-2">
+          <span class="text-sm text-slate-600 dark:text-slate-300">Düz kod gir (örn. AB12-CDEF-3456)</span>
+          <input type="text" name="plain_code" required minlength="8" autocomplete="off"
+                 placeholder="CSV’deki düz kodu girin"
+                 class="mt-1 w-full h-10 px-3 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700 uppercase tracking-wider">
+        </label>
+
+        <div class="md:col-span-4">
+          <button id="assign-submit" type="submit" disabled
+                  class="h-10 px-4 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">
+            Bağla
+          </button>
+
+          <div id="assign-msg" class="md:col-span-4 text-sm mt-1"></div>
+
+          <span class="text-xs text-slate-500 dark:text-slate-400 ml-2">Kod bağlamak için hem ID hem de düz kod zorunludur.</span>
+        </div>
+      </form>
+    </section>
+
+    <!-- 2) Yeni referans kodları (sadece indirme) -->
+    <section class="bg-white dark:bg-slate-800 rounded-xl shadow p-5">
+      <h2 class="font-medium text-lg mb-4">Yeni Referans Kodları üret</h2>
+
+      <form method="post" action="/admin/referrals/generate" target="_blank"
+            class="grid gap-4 md:grid-cols-4" autocomplete="off">
+        <label class="block">
+          <span class="text-sm text-slate-600 dark:text-slate-300">Adet</span>
+          <input name="count" type="number" min="1" max="100" value="10"
+                 class="mt-1 w-full h-10 px-3 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700">
+        </label>
+
+        <label class="block">
+          <span class="text-sm text-slate-600 dark:text-slate-300">Geçerlilik (gün)</span>
+          <input name="days" type="number" min="1" max="180" value="14"
+                 class="mt-1 w-full h-10 px-3 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700">
+        </label>
+
+        <label class="block md:col-span-2">
+          <span class="text-sm text-slate-600 dark:text-slate-300">(Opsiyonel) Sadece bu e-posta kullanabilsin</span>
+          <input name="email_reserved" type="email" placeholder="ör. user@example.com"
+                 class="mt-1 w-full h-10 px-3 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700">
+        </label>
+
+        <div class="md:col-span-4 flex flex-wrap gap-3 items-center">
+          <!-- CSV -->
+          <input type="hidden" name="mode" value="download">
+          <button type="submit"
+                  class="h-10 px-4 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">
+            Kodları Üret ve CSV İndir
+          </button>
+
+          <!-- ZIP (parolalı) -->
+          <div class="flex items-center gap-2">
+            <input type="password" name="zip_password" placeholder="ZIP parolası (opsiyonel)"
+                   class="h-10 px-3 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700">
+            <button type="submit" formaction="/admin/referrals/generate" formmethod="post"
+                    onclick="this.previousElementSibling.form.mode.value='zip'"
+                    class="h-10 px-4 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">
+              Kodları Üret ve ZIP İndir
+            </button>
+          </div>
+
+          <span class="text-xs text-slate-500 dark:text-slate-400">Plaintext kodlar sadece indirilen dosyada bulunur.</span>
+        </div>
+      </form>
+    </section>
+
+    <!-- 3) Kullanıcı listesi -->
+    <section class="bg-white dark:bg-slate-800 rounded-xl shadow p-5">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-medium text-lg">Son Kullanıcılar</h2>
+        <a href="/admin/referrals/export" class="h-10 px-4 rounded-lg border border-slate-300 dark:border-slate-600 text-sm">
+          Mevcut Eşleşmelerin CSV’si
+        </a>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead class="text-slate-500 dark:text-slate-300 border-b border-slate-200 dark:border-slate-700">
+            <tr>
+              <th class="py-2 pr-3 text-left">ID</th>
+              <th class="py-2 pr-3 text-left">Email</th>
+              <th class="py-2 pr-3 text-left">Ref ID</th>
+              <th class="py-2 pr-3 text-left">Durum</th>  <!-- eklendi -->
+              <th class="py-2 text-left">İşlem</th>
+           </tr>
+          </thead>
+          <tbody>
+            {% for u in users %}
+            <tr class="border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/40">
+              <td class="py-2 pr-3">{{ u.id }}</td>
+              <td class="py-2 pr-3">{{ u.email }}</td>
+
+        <td class="py-2 pr-3">{{ u.referral_code_id or "—" }}</td>
+
+        <!-- YENİ: Durum rozeti -->
+        <td class="py-2 pr-3">
+          {% if u.referral_code_id %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs border
+                         bg-emerald-100 text-emerald-700 border-emerald-300
+                         dark:bg-emerald-700/20 dark:text-emerald-300 dark:border-emerald-600/40">
+              CLAIMED
+            </span>
+          {% elif u.reserved_code_id %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs border
+                         bg-amber-100 text-amber-800 border-amber-300
+                         dark:bg-amber-700/20 dark:text-amber-300 dark:border-amber-600/40">
+              RESERVED{% if u.reserved_expires_at %} ({{ u.reserved_expires_at }}){% endif %}
+            </span>
+          {% else %}
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-xs border
+                         bg-slate-100 text-slate-700 border-slate-300
+                         dark:bg-slate-700/30 dark:text-slate-200 dark:border-slate-600/40">
+              AVAILABLE
+            </span>
+          {% endif %}
+        </td>
+
+        <td class="py-2">
+          {% if u.referral_code_id %}
+          <form hx-post="/admin/referrals/unassign" hx-target="body" hx-swap="innerHTML" class="inline">
+            <input type="hidden" name="user_id" value="{{ u.id }}">
+            <button class="h-9 px-3 rounded-lg bg-rose-600 text-white text-xs">Kodu Ayır</button>
+          </form>
+          {% else %}
+          <span class="text-slate-400 text-xs">—</span>
+          {% endif %}
+        </td>
+
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- 4) Kodlar listesi -->
+    <section class="bg-white dark:bg-slate-800 rounded-xl shadow p-5">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-medium text-lg">Kodlar</h2>
+        <form hx-post="/admin/referrals/expire_cleanup" hx-target="body" hx-swap="innerHTML" class="inline">
+          <button class="h-10 px-3 rounded-lg border border-slate-300 dark:border-slate-600 text-sm">
+            Süresi Geçen Rezervleri Temizle
+          </button>
+        </form>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead class="text-slate-500 dark:text-slate-300 border-b border-slate-200 dark:border-slate-700">
+            <tr>
+              <th class="py-2 pr-3 text-left">ID</th>
+              <th class="py-2 pr-3 text-left">Durum</th>
+              <th class="py-2 pr-3 text-left">Rezerve Email</th>
+              <th class="py-2 pr-3 text-left">Rezerve Kullanıcı</th>
+              <th class="py-2 pr-3 text-left">Expires</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for c in codes %}
+            <tr class="border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/40">
+              <td class="py-2 pr-3">#{{ c.id }}</td>
+              <td class="py-2 pr-3">
+                {{ c.status }}
+                {% if c.status == 'RESERVED' and c.email_reserved %}
+                  <div class="text-xs text-slate-500 dark:text-slate-400">
+                    {{ c.email_reserved }}
+                    {% if c.reserved_user_id %}
+                      — #{{ c.reserved_user_id }} {{ c.reserved_user_name or '' }}
+                    {% endif %}
+                    {% if c.expires_at %} ({{ c.expires_at }}){% endif %}
+                  </div>
+                {% endif %}
+              </td>
+              <td class="py-2 pr-3">{{ c.email_reserved or '—' }}</td>
+              <td class="py-2 pr-3">
+                {% if c.reserved_user_id %}
+                  #{{ c.reserved_user_id }} {{ c.reserved_user_name or '' }}
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+              <td class="py-2 pr-3">
+                {% if c.status == 'CLAIMED' %}
+                  Unlimited
+                {% else %}
+                  {{ c.expires_at or '—' }}
+                {% endif %}
+             </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+
+  </main>
+
+  <!-- Tema toggle -->
+  <script>
+    var btn = document.getElementById('themeToggle');
+    if (btn) {
+      btn.addEventListener('click', function () {
+        var el = document.documentElement;
+        var isDark = el.classList.toggle('dark');
+        localStorage.setItem('theme', isDark ? 'dark' : 'light');
+      });
+    }
+  </script>
+
+<script>
+  // Hata mesajını form altında göster
+  window.handleAssignError = function (e) {
+    const msgEl = document.getElementById('assign-msg');
+    let text = '';
+    try {
+      const json = JSON.parse(e.detail.xhr.responseText || '{}');
+      text = json.detail || '';
+    } catch (_) {}
+    if (!text) text = e.detail.xhr.responseText || 'İşlem başarısız.';
+    msgEl.textContent = text;
+    msgEl.className = 'md:col-span-4 text-sm mt-1 text-rose-600';
+  };
+
+  // İki alan dolmadan butonu açma; düz kodu normalize et
+  (function () {
+    const form = document.getElementById('assign-form');
+    if (!form) return;
+    const idField   = form.querySelector('[name="referral_id"]');
+    const codeField = form.querySelector('input[name="plain_code"]');
+    const submitBtn = document.getElementById('assign-submit');
+    const msgEl     = document.getElementById('assign-msg');
+
+    function validate() {
+      const ok = !!(idField.value && codeField.value && codeField.value.trim().length >= 8);
+      submitBtn.disabled = !ok;
+      if (msgEl) msgEl.textContent = ''; // eski hata mesajını temizle
+    }
+
+    idField.addEventListener('change', validate);
+    codeField.addEventListener('input', () => {
+      codeField.value = codeField.value.toUpperCase().replace(/\s+/g, '');
+      validate();
+    });
+
+    // İlk yüklemede de kontrol
+    validate();
+  })();
+</script>
+</body>
+</html>

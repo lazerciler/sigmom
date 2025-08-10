@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # app/database.py
-
+# Python 3.9
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.orm import declarative_base
 from app.config import settings

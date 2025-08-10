@@ -1,0 +1,97 @@
+<!DOCTYPE html> <!-- app/templates/panel.html -->
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SIGMOM Panel</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='css/panel.css') }}">
+
+  <script>
+    // Sunucudan gelen temel durum
+    window.__SIGMOM__ = {
+      isAuthenticated: {{ 'true' if user else 'false' }},
+      userName: {{ (user_name or '') | tojson }},
+      referralVerified: {{ 'true' if referral_verified else 'false' }},
+      capacityFull: {{ 'true' if capacity_full else 'false' }},
+      feedUrl: {{ (feed_url | tojson) if feed_url else 'null' }},
+    };
+  </script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="{{ url_for('static', path='img/logo.svg') }}" alt="SIGMOM" class="logo" onerror="this.style.display='none'"/>
+      <span>SIGMOM</span>
+    </div>
+
+    <div class="actions">
+      {% if not user %}
+        <a class="btn primary" href="/auth/google/login">Google ile Giriş</a>
+      {% else %}
+        <span class="hello">Merhaba, {{ user_name }}</span>
+        <a class="btn ghost" href="/auth/logout">Çıkış</a>
+      {% endif %}
+    </div>
+  </header>
+
+  {% if capacity_full and (not referral_verified) %}
+    <div class="banner warning">
+      <strong>Asil üyelikler doludur.</strong>
+      Şu an yalnızca <em>read-only</em> piyasa görünümüne erişebilirsiniz.
+    </div>
+  {% endif %}
+
+  {% if user and (not referral_verified) %}
+    <div class="banner info">
+      Hesabınız <strong>referans kodu</strong> ile doğrulanmadı. Tam erişim için kodunuzu girmeniz gerekecek.
+      <button id="open-referral" class="btn link">Kodu Gir</button>
+    </div>
+  {% endif %}
+
+  <main class="grid">
+    <section class="card chart-card">
+      <div class="card-head">
+        <h2>BTC/USDT (Read-Only)</h2>
+        <div class="pill-group">
+          <span class="pill neutral" id="feed-status">Bağlantı: kapalı</span>
+          <span class="pill">{{ 'Asil Üye' if referral_verified else 'Misafir' }}</span>
+        </div>
+      </div>
+      <div id="chart" class="chart"></div>
+      <div class="card-foot">
+        <small>Veriler gecikmeli/test amaçlı gösterilmektedir.</small>
+      </div>
+    </section>
+
+    <aside class="card side">
+      <h3>Durum</h3>
+      <ul class="kv">
+        <li><span>Kullanıcı</span><b>{{ user_name or 'Misafir' }}</b></li>
+        <li><span>Erişim</span><b>{{ 'Asil (tam)' if referral_verified else 'Read-only' }}</b></li>
+        <li><span>Kapasite</span><b>{{ 'Dolu' if capacity_full else 'Açık' }}</b></li>
+      </ul>
+      <hr/>
+      <h3>Güncel Duyuru</h3>
+      <p>Panel şu an sadece görüntüleme modunda. İşlem butonları, referans doğrulaması sonrası açılacaktır.</p>
+    </aside>
+  </main>
+
+  <!-- Referral Modal -->
+  <dialog id="ref-modal">
+    <form method="dialog" class="ref-form" id="ref-form">
+      <h3>Referans Kodunuzu Girin</h3>
+      <p>Bu kod belirli bir e-posta için tahsisli olabilir.</p>
+      <input type="text" name="code" id="ref-code" placeholder="Örn: AB12-CDEF-3456" autocomplete="one-time-code" />
+      <div class="modal-actions">
+        <button class="btn ghost" value="close">İptal</button>
+        <button class="btn primary" value="submit">Doğrula</button>
+      </div>
+      <div class="form-msg" id="ref-msg" role="alert" aria-live="polite"></div>
+    </form>
+  </dialog>
+
+  <!-- Sabit versiyon (örnek: 4.x) -->
+  <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+  <script src="http://localhost:8000/static/js/panel.js"></script>
+</body>
+</html>

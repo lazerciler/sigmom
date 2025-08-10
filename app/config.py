@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # app/config.py
-
+# Python 3.9
 from pydantic import BaseSettings, Field, root_validator
 from typing import List
 
@@ -38,6 +38,15 @@ class Settings(BaseSettings):
     MEXC_FUTURES_MAINNET_API_SECRET: str = Field(
         default="", env="MEXC_FUTURES_MAINNET_API_SECRET"
     )
+
+    # Google OAuth
+    GOOGLE_CLIENT_ID: str = Field(..., env="GOOGLE_CLIENT_ID")
+    GOOGLE_CLIENT_SECRET: str = Field(..., env="GOOGLE_CLIENT_SECRET")
+    GOOGLE_REDIRECT_URI: str = Field("http://localhost:8000/auth/google/callback", env="GOOGLE_REDIRECT_URI")
+    ADMIN_EMAILS: str = Field("", env="ADMIN_EMAILS")
+
+    # Session Secret
+    SESSION_SECRET: str = Field("dev-secret-change-me", env="SESSION_SECRET")
 
     @property
     def active_exchanges(self) -> List[str]:

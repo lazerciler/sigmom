@@ -1,25 +1,42 @@
 #!/usr/bin/env python3
 # app/main.py
-# python 3.9
+# Python 3.9
 import asyncio
 import logging
 import logging.config
 import os
 import sys
+import time
 
 from app.config import settings
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from starlette.middleware.sessions import SessionMiddleware
 
 from app.database import async_session
 from app.routers import webhook_router
 from app.utils.exchange_loader import load_execution_module
 from crud.trade import verify_pending_trades_for_execution
 from app.handlers.order_verification_handler import verify_closed_trades_for_execution
+from app.routers import panel
+from app.routers import referral
+from app.routers import auth_google
+from app.routers import admin_referrals
+from app.routers import auth
+from app.services.referral_maintenance import cleanup_expired_reserved
 
-if sys.version_info < (3, 9):
-    sys.exit("Python 3.9 or later is required")
+# Not: Aşağıdaki global sabitlere güvenmeyi bırakıyoruz...
+# CLEANUP_INTERVAL_SEC = 10 * 60  # 10 dk
+# _last_cleanup_ts: float = 0.0
+
+REQUIRED_PYTHON = (3, 9)
+if sys.version_info[:2] != REQUIRED_PYTHON:  # Sadece major.minor versiyonunu kontrol eder (3.9.x)
+    sys.exit(
+        f"Bu uygulama sadece Python {REQUIRED_PYTHON[0]}.{REQUIRED_PYTHON[1]} ile çalışır.\n"
+        f"Kullandığınız versiyon: {sys.version.split()[0]}\n"
+        f"Lütfen Python 3.9 kurunuz."
+    )
 
 # Logger ayarları
 logging.basicConfig(level=logging.INFO)
@@ -27,8 +44,18 @@ verifier_logger = logging.getLogger("verifier")
 
 # FastAPI app tanımı
 app = FastAPI(title="SIGMOM Signal Interface", version="1.0.0")
+
+# Session middleware
+app.add_middleware(SessionMiddleware, secret_key=settings.SESSION_SECRET, same_site="lax")
+
+# Statik ve router mount
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(webhook_router.router)
+app.include_router(panel.router)
+app.include_router(auth_google.router, prefix="/auth/google", tags=["auth"])
+app.include_router(referral.router, prefix="/referral", tags=["referral"])
+app.include_router(admin_referrals.router)
+app.include_router(auth.router)
 
 
 def setup_logging():
@@ -84,15 +111,33 @@ async def verifier_iteration(db, exchange_name: str) -> None:
         verifier_logger.error(f"Verifier error for {exchange_name}: {e}", exc_info=True)
 
 
-async def verifier_loop(poll_interval: int = 5):
+async def verifier_loop(poll_interval: int = 5, cleanup_interval_sec: int = 10 * 60):
     await asyncio.sleep(3)
     verifier_logger.info("Verifier loop startup’ta başlatıldı.")
 
+    last_cleanup_ts = 0.0
+
     while True:
         verifier_logger.info("֍ verifier_loop iteration start")
+
+        # 1) Trade doğrulama — kendi session'unda
         async with async_session() as db:
             for exchange_name in settings.active_exchanges:
                 await verifier_iteration(db, exchange_name)
+
+        # 2) Referral expiry cleanup — AYRI session
+        now_ts = time.monotonic()
+        if now_ts - last_cleanup_ts >= cleanup_interval_sec:
+            try:
+                async with async_session() as s:
+                    async with s.begin():
+                        n = await cleanup_expired_reserved(s)
+                if n:
+                    verifier_logger.info("Referral expiry cleanup: %s satır temizlendi", n)
+            except Exception as exc:
+                verifier_logger.exception("Referral expiry cleanup hata: %s", exc)
+            last_cleanup_ts = now_ts
+
         await asyncio.sleep(poll_interval)
 
 
