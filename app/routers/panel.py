@@ -9,8 +9,9 @@ from app.database import async_session
 from app.services.referrals import get_dynamic_capacity
 from sqlalchemy import text
 
-templates = Jinja2Templates(directory="app/templates")
 router = APIRouter()
+templates = Jinja2Templates(directory="app/templates")
+
 
 @router.get("/", response_class=HTMLResponse)
 async def panel(request: Request, user=Depends(get_current_user_opt)):

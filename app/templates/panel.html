@@ -1,97 +1,163 @@
-<!DOCTYPE html> <!-- app/templates/panel.html -->
+<!doctype html>
 <html lang="tr">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>SIGMOM Panel</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='css/panel.css') }}">
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>SIGMOM • Panel</title>
 
+  <!-- Sayfa boyanmadan önce tema -->
   <script>
-    // Sunucudan gelen temel durum
+    (() => {
+      const t = localStorage.getItem('theme');
+      const prefersDark = matchMedia('(prefers-color-scheme: dark)').matches;
+      if (t === 'dark' || (!t && prefersDark)) document.documentElement.classList.add('dark');
+    })();
+  </script>
+
+  <!-- Tailwind (CDN) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>tailwind.config = { darkMode: 'class' }</script>
+
+  <!-- Sunucu durumu -->
+  <script>
     window.__SIGMOM__ = {
       isAuthenticated: {{ 'true' if user else 'false' }},
-      userName: {{ (user_name or '') | tojson }},
+      userName: {{ (user.name if user and (user.name is defined) else '') | tojson }},
       referralVerified: {{ 'true' if referral_verified else 'false' }},
       capacityFull: {{ 'true' if capacity_full else 'false' }},
       feedUrl: {{ (feed_url | tojson) if feed_url else 'null' }},
     };
   </script>
-</head>
-<body>
-  <header class="topbar">
-    <div class="brand">
-      <img src="{{ url_for('static', path='img/logo.svg') }}" alt="SIGMOM" class="logo" onerror="this.style.display='none'"/>
-      <span>SIGMOM</span>
-    </div>
 
-    <div class="actions">
-      {% if not user %}
-        <a class="btn primary" href="/auth/google/login">Google ile Giriş</a>
-      {% else %}
-        <span class="hello">Merhaba, {{ user_name }}</span>
-        <a class="btn ghost" href="/auth/logout">Çıkış</a>
-      {% endif %}
+  <!-- Ufak stil dokunuşları -->
+  <style>
+    .chip{display:inline-flex;align-items:center;height:28px;padding:0 10px;border-radius:10px;font-size:12px;border:1px solid rgb(203 213 225/0.6)}
+    .card{border:1px solid rgb(226 232 240);border-radius:16px;background:#fff}
+    .dark .card{border-color:#0b1220;background:#0f172a}
+    .kpi{border:1px solid rgb(226 232 240);border-radius:14px;padding:12px 12px 10px;background:#fff}
+    .dark .kpi{background:#0f172a;border-color:#0b1220}
+    .kpi h6{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#64748b}
+    .kpi div{font-weight:600;margin-top:6px}
+  </style>
+</head>
+
+<body class="bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-100">
+
+  <!-- Üst bar -->
+  <header class="sticky top-0 z-40 backdrop-blur border-b border-slate-200/60 dark:border-slate-800/80 bg-white/70 dark:bg-slate-900/60">
+    <div class="max-w-7xl mx-auto px-4 lg:px-6 h-14 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <span class="h-6 w-6 rounded bg-indigo-600 text-white grid place-items-center text-xs font-semibold">S</span>
+        <span class="text-sm font-medium text-slate-500 dark:text-slate-400">Panel</span>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <!-- Tema: tek buton -->
+        <button data-theme-toggle
+                class="h-8 w-8 rounded-lg border border-slate-300 dark:border-slate-600">🌓</button>
+
+        {% if user %}
+          {% if referral_verified %}
+            <span id="role-chip" class="chip bg-emerald-50 dark:bg-emerald-900/20 border-emerald-300/50 text-emerald-700 dark:text-emerald-300">Asil Üye</span>
+          {% else %}
+            <span id="role-chip" class="chip bg-amber-50 dark:bg-amber-900/20 border-amber-300/50 text-amber-700 dark:text-amber-300">Read-Only</span>
+          {% endif %}
+          <div class="text-sm hidden sm:block">Merhaba, {{ user.name or user.email }}</div>
+          <a href="/auth/google/logout"
+             class="h-9 px-3 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 transition
+                    dark:border-slate-600 dark:text-slate-100 dark:hover:bg-slate-800
+                    text-sm font-medium inline-flex items-center">Çıkış</a>
+        {% else %}
+          <span class="chip bg-slate-100 dark:bg-slate-800/60 border-slate-300/60 dark:border-slate-600/50">Misafir</span>
+          <a href="/auth/google/login"
+             class="h-9 px-3 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 text-sm font-medium inline-flex items-center">Giriş Yap</a>
+        {% endif %}
+      </div>
     </div>
   </header>
 
-  {% if capacity_full and (not referral_verified) %}
-    <div class="banner warning">
-      <strong>Asil üyelikler doludur.</strong>
-      Şu an yalnızca <em>read-only</em> piyasa görünümüne erişebilirsiniz.
-    </div>
-  {% endif %}
+  <!-- İçerik -->
+  <main class="max-w-7xl mx-auto px-4 lg:px-6 py-6 space-y-6">
 
-  {% if user and (not referral_verified) %}
-    <div class="banner info">
-      Hesabınız <strong>referans kodu</strong> ile doğrulanmadı. Tam erişim için kodunuzu girmeniz gerekecek.
-      <button id="open-referral" class="btn link">Kodu Gir</button>
-    </div>
-  {% endif %}
-
-  <main class="grid">
-    <section class="card chart-card">
-      <div class="card-head">
-        <h2>BTC/USDT (Read-Only)</h2>
-        <div class="pill-group">
-          <span class="pill neutral" id="feed-status">Bağlantı: kapalı</span>
-          <span class="pill">{{ 'Asil Üye' if referral_verified else 'Misafir' }}</span>
+    <!-- Üst grid -->
+    <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <!-- Grafik -->
+      <div class="lg:col-span-8">
+        <div class="card shadow-sm">
+          <div class="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700">
+            <div class="text-sm font-semibold">BTC/USDT</div>
+            <span id="feed-status" class="chip bg-slate-100 dark:bg-slate-800/60">Bağlantı: —</span>
+          </div>
+          <div id="chart" class="h-[380px] sm:h-[440px] min-h-[260px]"></div>
+          <div class="px-4 py-2 text-[11px] text-slate-500 dark:text-slate-400 border-t border-slate-200 dark:border-slate-700">
+            Veriler gecikmeli/test amaçlı gösterilebilir.
+          </div>
         </div>
       </div>
-      <div id="chart" class="chart"></div>
-      <div class="card-foot">
-        <small>Veriler gecikmeli/test amaçlı gösterilmektedir.</small>
-      </div>
+
+      <!-- Sağ panel -->
+      <aside class="lg:col-span-4">
+        <div class="card shadow-sm p-4">
+          <h3 class="text-sm font-semibold mb-3">Durum</h3>
+          <dl class="text-sm grid grid-cols-3 gap-y-2">
+            <dt class="col-span-1 text-slate-500">Kullanıcı</dt><dd class="col-span-2 truncate">{{ user.name or user.email if user else '—' }}</dd>
+            <dt class="col-span-1 text-slate-500">Erişim</dt><dd id="access-level" class="col-span-2">{% if user and referral_verified %}Asil (tam){% elif user %}Read-Only{% else %}Misafir{% endif %}</dd>
+            <dt class="col-span-1 text-slate-500">Kapasite</dt><dd class="col-span-2">{{ 'Dolu' if capacity_full else 'Boş' }}</dd>
+          </dl>
+
+          <div class="my-4 border-t border-slate-200 dark:border-slate-700"></div>
+
+          <h4 class="text-sm font-semibold mb-2">Güncel Duyuru</h4>
+          <p class="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+            Panel şu an görüntüleme modunda. İşlem butonları, referans doğrulaması sonrası açılacaktır.
+          </p>
+
+          {% if user and not referral_verified %}
+            <button id="open-referral"
+                    class="mt-4 w-full h-10 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">
+              Referans Kodu Gir
+            </button>
+          {% endif %}
+        </div>
+      </aside>
     </section>
 
-    <aside class="card side">
-      <h3>Durum</h3>
-      <ul class="kv">
-        <li><span>Kullanıcı</span><b>{{ user_name or 'Misafir' }}</b></li>
-        <li><span>Erişim</span><b>{{ 'Asil (tam)' if referral_verified else 'Read-only' }}</b></li>
-        <li><span>Kapasite</span><b>{{ 'Dolu' if capacity_full else 'Açık' }}</b></li>
-      </ul>
-      <hr/>
-      <h3>Güncel Duyuru</h3>
-      <p>Panel şu an sadece görüntüleme modunda. İşlem butonları, referans doğrulaması sonrası açılacaktır.</p>
-    </aside>
+    <!-- KPI -->
+    <section class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div class="kpi"><h6>PnL (7g)</h6><div id="kpi-pnl">—</div></div>
+      <div class="kpi"><h6>Winrate (30g)</h6><div id="kpi-win">—</div></div>
+      <div class="kpi"><h6>Açık Pozisyon</h6><div id="kpi-open">—</div></div>
+      <div class="kpi"><h6>Max DD (30g)</h6><div id="kpi-dd">—</div></div>
+      <div class="kpi"><h6>Sharpe (30g)</h6><div id="kpi-sharpe">—</div></div>
+      <div class="kpi"><h6>Son Sinyal</h6><div id="kpi-last" class="text-xs">—</div></div>
+    </section>
+
+    <!-- Tablolar yer tutucu -->
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div class="card shadow-sm p-4"><h3 class="text-sm font-semibold mb-3">Açık Pozisyonlar</h3><div class="text-sm text-slate-500">Yakında.</div></div>
+      <div class="card shadow-sm p-4"><h3 class="text-sm font-semibold mb-3">Son Sinyaller</h3><div class="text-sm text-slate-500">Yakında.</div></div>
+    </section>
   </main>
 
-  <!-- Referral Modal -->
-  <dialog id="ref-modal">
-    <form method="dialog" class="ref-form" id="ref-form">
-      <h3>Referans Kodunuzu Girin</h3>
-      <p>Bu kod belirli bir e-posta için tahsisli olabilir.</p>
-      <input type="text" name="code" id="ref-code" placeholder="Örn: AB12-CDEF-3456" autocomplete="one-time-code" />
-      <div class="modal-actions">
-        <button class="btn ghost" value="close">İptal</button>
-        <button class="btn primary" value="submit">Doğrula</button>
+  <!-- Lightweight Charts -->
+  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js" defer></script>
+  <!-- Panel JS -->
+  <script src="{{ url_for('static', path='js/panel.js') }}?v=20250811d" defer></script>
+
+  <!-- Referans modal -->
+  <dialog id="ref-modal" class="backdrop:bg-black/50 rounded-xl p-0 w-full max-w-md">
+    <form id="ref-form" method="dialog" class="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-xl overflow-hidden">
+      <div class="p-4 border-b border-slate-200 dark:border-slate-700 text-sm font-semibold">Referans Kodu Doğrula</div>
+      <div class="p-4 space-y-3">
+        <input id="ref-code" type="text" placeholder="AAAA-BBBB-CCCC"
+               class="w-full h-10 px-3 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700 uppercase tracking-wider" autocomplete="one-time-code" />
+        <div id="ref-msg" class="text-sm"></div>
       </div>
-      <div class="form-msg" id="ref-msg" role="alert" aria-live="polite"></div>
+      <div class="p-3 bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-2">
+        <button id="ref-cancel" type="button" class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-600">İptal</button>
+        <button id="ref-submit" type="submit" class="h-9 px-3 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">Doğrula</button>
+      </div>
     </form>
   </dialog>
-
-  <!-- Sabit versiyon (örnek: 4.x) -->
-  <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
-  <script src="http://localhost:8000/static/js/panel.js"></script>
 </body>
 </html>
