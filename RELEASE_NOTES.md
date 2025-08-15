@@ -1,5 +1,33 @@
 # SIGMOM — Release Notes
 
+# v0.2.2 — LF Normalization & PyCharm Working Tree Sync
+**Yayın Tarihi:** 15 Ağustos 2025  
+
+## 🚀 Öne Çıkanlar
+- **Satır Sonu Standartlaştırma:**  
+  `.gitattributes` eklendi ve tüm kod tabanı **LF** satır sonuna normalize edildi.  
+  Bu, platformlar arası uyumu artırır ve gereksiz diff değişikliklerini engeller.
+- **Yeni Router’lar:**
+  - `app/routers/market.py` — Market verisi için API endpoint’leri
+  - `app/routers/panel_data.py` — Panel arayüzüne veri sağlayan API endpoint’leri
+- **Binance Futures Modülleri Güncellemeleri:**
+  - `settings.py`, `utils.py`, `order_handler.py`, `positions.py`, `sync.py`, `account.py` üzerinde iyileştirmeler
+- **Panel Arayüzü Geliştirmeleri:**
+  - `app/static/css/panel.css` ve `app/static/js/panel.js` güncellendi
+  - `app/templates/panel.html` üzerinde arayüz düzenlemeleri
+- **Yeni Şema Dosyaları:**
+  - `schema/acceptable_json_examples.txt`
+  - `schema/sigmom_pro_v1_20250813_dump.sql`
+- **Temizlik:**
+  - `hash_log.txt` ve gereksiz eski dosyalar kaldırıldı
+  - `crud/trade.py` düzenlendi, eski versiyon `trade-old.py` olarak arşivlendi
+
+## 📊 Değişiklik Özeti
+- **30 dosya değişti**
+- **+1452 satır** eklendi, **-575 satır** silindi
+- CRLF → LF dönüşümü tamamlandı
+
+
 ## v0.1.0-stable — 2025-08-08
 
 ### Öne Çıkanlar
