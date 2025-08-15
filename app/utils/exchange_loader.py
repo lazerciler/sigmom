@@ -6,10 +6,10 @@ import importlib
 
 def load_execution_module(exchange: str):
 
-    """Diğer modüller henüz yazılmadığından sadece öntanımlı borsa kullanılıyor"""
-
     if exchange == "binance_futures_testnet":
         from app.exchanges.binance_futures_testnet import sync, order_handler
+    # elif exchange == "binance_futures_mainnet":          # ← YENİ
+    #     from app.exchanges.binance_futures_mainnet import sync, order_handler
     else:
         raise ValueError(f"Exchange not supported: {exchange}")
 

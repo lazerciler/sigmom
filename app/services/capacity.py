@@ -1,4 +1,7 @@
+#!/usr/bin/env python3
 # app/services/capacity.py
+# Python 3.9
+
 # Lokal test için kapasite durumu stub.
 # ?full=1 parametresiyle “kapasite dolu” sahnesini test edersin.
 

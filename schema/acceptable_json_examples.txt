@@ -1,0 +1,53 @@
+# Open long
+{
+  "mode": "open",
+  "side": "long",
+  "symbol": "BTCUSDT",
+  "entry_price": 58000,
+  "position_size": 0.001,
+  "leverage": 5,
+  "order_type": "market",
+  "exchange": "binance_futures_testnet",
+  "timestamp": "2025-08-03T12:00:00Z",
+  "fund_manager_id": "fxmgr_tj2025_rQz91"
+}
+
+# Close long
+{
+  "mode": "close",
+  "side": "long",
+  "symbol": "BTCUSDT",
+  "exit_price": 60100,
+  "position_size": 0.001,
+  "order_type": "market",
+  "exchange": "binance_futures_testnet",
+  "timestamp": "2025-08-03T14:00:00Z",
+  "fund_manager_id": "fxmgr_tj2025_rQz91"
+}
+
+# Open short
+{
+  "mode": "open",
+  "side": "short",
+  "symbol": "BTCUSDT",
+  "entry_price": 60000,
+  "position_size": 0.001,
+  "leverage": 5,
+  "order_type": "market",
+  "exchange": "binance_futures_testnet",
+  "timestamp": "2025-08-03T14:00:00Z",
+  "fund_manager_id": "fxmgr_tj2025_rQz91"
+}
+
+# Close short
+{
+  "mode": "close",
+  "side": "short",
+  "symbol": "BTCUSDT",
+  "exit_price": 60000,
+  "position_size": 0.001,
+  "order_type": "market",
+  "exchange": "binance_futures_testnet",
+  "timestamp": "2025-08-03T15:00:00Z",
+  "fund_manager_id": "fxmgr_tj2025_rQz91"
+}

@@ -33,9 +33,17 @@
   <style>
     .chip{display:inline-flex;align-items:center;height:28px;padding:0 10px;border-radius:10px;font-size:12px;border:1px solid rgb(203 213 225/0.6)}
     .card{border:1px solid rgb(226 232 240);border-radius:16px;background:#fff}
-    .dark .card{border-color:#0b1220;background:#0f172a}
+    /* Dark: kartları bir ton AÇ (slate-800) ve sınırı slate-700 yap */
+    .dark .card{border-color:#334155;background:#1f2937}
     .kpi{border:1px solid rgb(226 232 240);border-radius:14px;padding:12px 12px 10px;background:#fff}
-    .dark .kpi{background:#0f172a;border-color:#0b1220}
+    .dark .kpi{background:#1f2937;border-color:#334155}
+    /* aktif TF butonu vurgusu */
+    #tf-controls [data-tf][aria-current="true"]{
+      background:#2563eb;color:#fff;border-color:rgba(37,99,235,.5);
+    }
+    .dark #tf-controls [data-tf][aria-current="true"]{
+      background:#3b82f6;border-color:rgba(59,130,246,.5);
+    }
     .kpi h6{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#64748b}
     .kpi div{font-weight:600;margin-top:6px}
   </style>
@@ -85,12 +93,23 @@
       <div class="lg:col-span-8">
         <div class="card shadow-sm">
           <div class="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700">
-            <div class="text-sm font-semibold">BTC/USDT</div>
-            <span id="feed-status" class="chip bg-slate-100 dark:bg-slate-800/60">Bağlantı: —</span>
+            <div id="symbol-label" class="text-sm font-semibold">—</div>
+            <div class="flex items-center gap-2">
+              <!-- TF butonları -->
+              <div id="tf-controls" class="hidden sm:inline-flex gap-1 text-xs">
+                <button class="chip" data-tf="1m">1m</button>
+                <button class="chip" data-tf="5m">5m</button>
+                <button class="chip" data-tf="15m">15m</button>
+                <button class="chip" data-tf="1h">1h</button>
+                <button class="chip" data-tf="4h">4h</button>
+                <button class="chip" data-tf="1d">1d</button>
+              </div>
+              <span id="feed-status" class="chip bg-slate-100 dark:bg-slate-800/60">Bağlantı: —</span>
+            </div>
           </div>
           <div id="chart" class="h-[380px] sm:h-[440px] min-h-[260px]"></div>
-          <div class="px-4 py-2 text-[11px] text-slate-500 dark:text-slate-400 border-t border-slate-200 dark:border-slate-700">
-            Veriler gecikmeli/test amaçlı gösterilebilir.
+          <div id="data-disclaimer" class="px-4 py-2 text-[11px] text-slate-500 dark:text-slate-400 border-t border-slate-200 dark:border-slate-700">
+            SIGMOM - SAI (Signal Alert Interface)
           </div>
         </div>
       </div>
@@ -125,17 +144,17 @@
     <!-- KPI -->
     <section class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
       <div class="kpi"><h6>PnL (7g)</h6><div id="kpi-pnl">—</div></div>
-      <div class="kpi"><h6>Winrate (30g)</h6><div id="kpi-win">—</div></div>
-      <div class="kpi"><h6>Açık Pozisyon</h6><div id="kpi-open">—</div></div>
-      <div class="kpi"><h6>Max DD (30g)</h6><div id="kpi-dd">—</div></div>
-      <div class="kpi"><h6>Sharpe (30g)</h6><div id="kpi-sharpe">—</div></div>
-      <div class="kpi"><h6>Son Sinyal</h6><div id="kpi-last" class="text-xs">—</div></div>
+      <div class="kpi"><h6>WINRATE (30g)</h6><div id="kpi-win">—</div></div>
+      <div class="kpi"><h6>AÇIK POZİSYON</h6><div id="kpi-open">—</div></div>
+      <div class="kpi"><h6>MAX DD (30g)</h6><div id="kpi-dd">—</div></div>
+      <div class="kpi"><h6>SHARPE RATIO (30g)</h6><div id="kpi-sharpe">—</div></div>
+      <div class="kpi"><h6>SON İŞLEM</h6><div id="kpi-last" class="text-xs">—</div></div>
     </section>
 
     <!-- Tablolar yer tutucu -->
     <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <div class="card shadow-sm p-4"><h3 class="text-sm font-semibold mb-3">Açık Pozisyonlar</h3><div class="text-sm text-slate-500">Yakında.</div></div>
-      <div class="card shadow-sm p-4"><h3 class="text-sm font-semibold mb-3">Son Sinyaller</h3><div class="text-sm text-slate-500">Yakında.</div></div>
+      <div class="card shadow-sm p-4"><h3 class="text-sm font-semibold mb-3">Açık Pozisyonlar</h3><div id="open-positions" class="text-sm text-slate-500">—</div></div>
+      <div class="card shadow-sm p-4"><h3 class="text-sm font-semibold mb-3">Kapanan İşlemler</h3><div id="recent-trades" class="text-sm text-slate-500">—</div></div>
     </section>
   </main>
 

@@ -3,20 +3,22 @@
 ├── .gitignore
 ├── LICENSE
 ├── README.md
+├── RELEASE_NOTES.md
 ├── alembic.ini
 ├── env.example
-├── hash_log.txt
 ├── pyproject.toml
 ├── requirements.txt
 ├── app/
 │   ├── __init__.py
 │   ├── config.py
 │   ├── database.py
-│   ├── main-old.py
+│   ├── dependencies.py
 │   ├── main.py
-│   ├── models-old.py
 │   ├── models.py
 │   ├── schemas.py
+│   ├── dependencies/
+│   │   ├── __init__.py
+│   │   └── auth.py
 │   ├── exchanges/
 │   │   └── binance_futures_testnet/
 │   │       ├── __init__.py
@@ -32,13 +34,30 @@
 │   │   └── signal_handler.py
 │   ├── routers/
 │   │   ├── __init__.py
-│   │   ├── dashboard.py
-│   │   ├── verify.py
+│   │   ├── admin_referrals.py
+│   │   ├── auth.py
+│   │   ├── auth_google.py
+│   │   ├── market.py
+│   │   ├── panel.py
+│   │   ├── panel_data.py
+│   │   ├── referral.py
 │   │   └── webhook_router.py
 │   ├── services/
-│   │   └── __init__.py
+│   │   ├── __init__.py
+│   │   ├── capacity.py
+│   │   ├── referral_maintenance.py
+│   │   └── referrals.py
 │   ├── static/
-│   │   └── favicon.ico
+│   │   ├── favicon.ico
+│   │   ├── css/
+│   │   │   └── panel.css
+│   │   ├── img/
+│   │   │   └── logo.svg
+│   │   └── js/
+│   │       └── panel.js
+│   ├── templates/
+│   │   ├── admin_referrals.html
+│   │   └── panel.html
 │   └── utils/
 │       ├── __init__.py
 │       ├── exchange_loader.py
@@ -48,6 +67,7 @@
 ├── crud/
 │   ├── __init__.py
 │   ├── raw_signal.py
+│   ├── trade-old.py
 │   └── trade.py
 ├── migrations/
 │   ├── README
@@ -62,6 +82,8 @@
 │       ├── 1160387fe8a3_add_pending_verification_fields_and_.py
 │       ├── 1a48d99bcb71_rename_pnl_to_realized_pnl_in_strategy_.py
 │       ├── 1f1d2fb58a3b_add_exchange_column_to_strategy_tables.py
+│       ├── 20250809_add_referral_system.py
+│       ├── 20250810_add_available_to_referral_status_enum_add_available_to_referral_status_enum.py
 │       ├── 20a331d96d22_your_next_change.py
 │       ├── 3eb8b25f3944_your_next_change.py
 │       ├── 541fa9870fda_increase_exchange_field_length.py
@@ -71,7 +93,12 @@
 │       ├── ef846562f771_add_leverage_to_strategy_trades.py
 │       └── efc05fe65026_increase_exchange_field_length.py
 ├── schema/
-│   └── project_skeleton.txt
+│   ├── acceptable_json_examples.txt
+│   ├── project_skeleton.txt
+│   └── sigmom_pro_v1_20250813_dump.sql
 └── scripts/
+    ├── README.txt
     ├── generate_timestamp.py
+    ├── idtest.py
+    ├── seed_demo_users.py
     └── zip_logger_backup.py

@@ -1,3 +1,7 @@
+#!/usr/bin/env python3
+# app/database.py
+# Python 3.9
+
 # Lokal test için “opsiyonel kullanıcı” döndüren minimal dependency.
 # ?mock_user=1 ile kullanıcıyı simüle eder; ?verified=1 ile referans doğrulanmış gibi davranır.
 

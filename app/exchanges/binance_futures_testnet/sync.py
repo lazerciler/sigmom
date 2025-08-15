@@ -3,20 +3,18 @@
 # Python 3.9
 import logging
 import httpx
-from app.exchanges.binance_futures_testnet.settings import API_KEY, BASE_URL
-from app.exchanges.binance_futures_testnet.utils import (
-    sign_payload,
-    get_binance_server_time,
-)
+from .settings import API_KEY, BASE_URL, ENDPOINTS
+from .utils import sign_payload, get_binance_server_time
 
 logger = logging.getLogger(__name__)
+
 
 async def get_open_position(symbol: str) -> dict:
     """
     Binance Futures testnet üzerinde verilen sembol için açık pozisyonu getirir.
     """
     try:
-        endpoint = "/fapi/v2/positionRisk"
+        endpoint = ENDPOINTS["POSITION_RISK"]
         url = f"{BASE_URL}{endpoint}"
 
         # Tüm parametreler imzaya dahil edilmeli

@@ -8,7 +8,7 @@ from app.models import StrategyOpenTrade
 import uuid
 
 from app.schemas import WebhookSignal
-from .settings import BASE_URL
+from .settings import BASE_URL, ENDPOINTS
 from .utils import (
     sign_payload,
     get_signed_headers,
@@ -46,22 +46,12 @@ async def place_order(signal_data: WebhookSignal) -> dict:
     if order_type != "market":
         raise ValueError("Limit orders are not currently supported by the system.")
 
-    # Kaldıraç ayarını utils üzerinden çağır
-    # await set_leverage(signal_data.symbol, signal_data.leverage)
-    # logger.info(f"OrderHandler → Leverage çağırıldı: {signal_data.symbol} x{signal_data.leverage}")
-
-    # NOT: Leverage ayarı order_handler'dan kaldırıldı.
-    # OPEN için leverage gerekiyorsa signal_handler zaten çağırıyor.
-
-    endpoint = "/fapi/v1/order"
+    endpoint = ENDPOINTS["ORDER"]
     url = BASE_URL + endpoint
 
     symbol = signal_data.symbol.upper()
     order_type = signal_data.order_type.upper()  # MARKET
     quantity = await adjust_quantity(signal_data.symbol, signal_data.position_size)
-
-    # side_map = {"long": "BUY", "short": "SELL"}
-    # side = side_map.get(signal_data.side.lower(), signal_data.side.upper())
 
     mode = (signal_data.mode or "").lower()
     side_in = (signal_data.side or "").lower()
@@ -105,12 +95,12 @@ async def place_order(signal_data: WebhookSignal) -> dict:
 
 
 async def get_position(symbol: str) -> dict:
-    logger = logging.getLogger("verifier")  # Bu da gölgesi, madem istedin eksik olmasın! : Shadows name 'logger' from outer scope
+    # logger = logging.getLogger("verifier")
     logger.debug(f"📡 get_position() çağrıldı → {symbol}")
     """
     Binance Futures pozisyon bilgilerini alır.
     """
-    endpoint = "/fapi/v2/positionRisk"
+    endpoint = ENDPOINTS["POSITION_RISK"]
     url = BASE_URL + endpoint
 
     server_time = await get_binance_server_time()
@@ -142,7 +132,7 @@ async def query_order_status(symbol: str, order_id: str) -> dict:
     Binance Futures'ta bir order'ın durumunu kontrol eder.
     """
     try:
-        endpoint = "/fapi/v1/order"
+        endpoint = ENDPOINTS["ORDER"]
         url = BASE_URL + endpoint
 
         server_time = await get_binance_server_time()
@@ -169,12 +159,12 @@ async def query_order_status(symbol: str, order_id: str) -> dict:
                 "data": data
             }
         else:
-            logger.error(f"Binance order sorgusu başarısız: {data}")
+            logger.error(f"Binance order query failed: {data}")
             return {
                 "success": False,
-                "message": data.get("msg", "Bilinmeyen hata")
+                "message": data.get("msg", "Unknown error")
             }
 
     except Exception as e:
-        logger.exception("Binance order status sorgusu sırasında hata oluştu")
+        logger.exception("An error occurred during the Binance order status query.")
         return {"success": False, "message": str(e)}

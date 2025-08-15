@@ -20,15 +20,14 @@ from app.utils.exchange_loader import load_execution_module
 from crud.trade import verify_pending_trades_for_execution
 from app.handlers.order_verification_handler import verify_closed_trades_for_execution
 from app.routers import panel
+from app.routers import panel_data
 from app.routers import referral
 from app.routers import auth_google
 from app.routers import admin_referrals
 from app.routers import auth
+from app.routers import market
 from app.services.referral_maintenance import cleanup_expired_reserved
 
-# Not: Aşağıdaki global sabitlere güvenmeyi bırakıyoruz...
-# CLEANUP_INTERVAL_SEC = 10 * 60  # 10 dk
-# _last_cleanup_ts: float = 0.0
 
 REQUIRED_PYTHON = (3, 9)
 if sys.version_info[:2] != REQUIRED_PYTHON:  # Sadece major.minor versiyonunu kontrol eder (3.9.x)
@@ -52,11 +51,12 @@ app.add_middleware(SessionMiddleware, secret_key=settings.SESSION_SECRET, same_s
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(webhook_router.router)
 app.include_router(panel.router)
+app.include_router(panel_data.router)
 app.include_router(auth_google.router, prefix="/auth/google", tags=["auth"])
 app.include_router(referral.router, prefix="/referral", tags=["referral"])
 app.include_router(admin_referrals.router)
 app.include_router(auth.router)
-
+app.include_router(market.router)
 
 def setup_logging():
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()

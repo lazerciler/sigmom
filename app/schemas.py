@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # app/schemas.py
-
+# Python 3.9
 from typing import Literal, Optional
 from datetime import datetime
 from pydantic import BaseModel, root_validator

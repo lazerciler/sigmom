@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # app/utils/generate_hash.py
-
+# python 3.9
 import hashlib
 from app.schemas import WebhookSignal
 

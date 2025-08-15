@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # app/models.py
-
+# Python 3.9
 import uuid
 from sqlalchemy import (
     Column,

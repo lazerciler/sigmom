@@ -14,7 +14,6 @@ from crud.trade import (
     get_open_trade_for_close,
     close_open_trade_and_record
 )
-#    close_trade_and_record,
 
 logger = logging.getLogger(__name__)
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # crud/raw_signal.py
-
+# Python 3.9
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.encoders import jsonable_encoder
 import logging
@@ -10,6 +10,7 @@ from app.schemas import WebhookSignal
 from app.utils.exchange_loader import load_utils_module
 
 logger = logging.getLogger(__name__)
+
 
 async def insert_raw_signal(db: AsyncSession, signal: WebhookSignal) -> RawSignal:
     # 1. Leverage ayarını dinamik utils modülüne devret

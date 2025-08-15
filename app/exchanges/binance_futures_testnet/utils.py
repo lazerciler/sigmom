@@ -8,16 +8,17 @@ import hashlib
 from urllib.parse import urlencode
 from decimal import Decimal, ROUND_DOWN
 from time import time as _time
-from .settings import API_KEY, API_SECRET, BASE_URL
+from .settings import API_KEY, API_SECRET, BASE_URL, ENDPOINTS
 
 logger = logging.getLogger(__name__)
+
 
 async def set_leverage(symbol: str, leverage: int) -> dict:
     """
     Binance Futures testnet üzerinde sembol için kaldıracı ayarlar.
     """
     logger.info(f"Binance API → leverage ayarı başlıyor: {symbol} x{leverage}")
-    endpoint = "/fapi/v1/leverage"
+    endpoint = ENDPOINTS["LEVERAGE"]
     url = BASE_URL + endpoint
 
     # Sunucu saatini al ve parametreleri hazırla
@@ -77,7 +78,7 @@ async def get_binance_server_time() -> int:
     """
     Binance sunucu zamanını timestamp (ms) olarak alır.
     """
-    url = f"{BASE_URL}/fapi/v1/time"
+    url = f"{BASE_URL}{ENDPOINTS['TIME']}"
     async with httpx.AsyncClient() as client:
         resp = await client.get(url)
         resp.raise_for_status()
@@ -89,7 +90,7 @@ async def adjust_quantity(symbol: str, quantity: float) -> str:
     """
     Sembolün lot adımına göre miktarı ayarlar.
     """
-    url = f"{BASE_URL}/fapi/v1/exchangeInfo"
+    url = f"{BASE_URL}{ENDPOINTS['EXCHANGE_INFO']}"
     async with httpx.AsyncClient() as client:
         resp = await client.get(url)
         resp.raise_for_status()
