@@ -1,2 +1,11 @@
 [project]
 requires-python = ">=3.9,<3.10"
+
+[tool.black]
+line-length = 88
+target-version = ["py39"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+# örnek: select/ignore listeleri buraya eklenebilir
