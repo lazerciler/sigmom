@@ -1,11 +1,11 @@
 # SIGMOM — Release Notes
 
 # v0.2.2 — LF Normalization & PyCharm Working Tree Sync
-**Yayın Tarihi:** 15 Ağustos 2025  
+**Yayın Tarihi:** 15 Ağustos 2025
 
 ## 🚀 Öne Çıkanlar
-- **Satır Sonu Standartlaştırma:**  
-  `.gitattributes` eklendi ve tüm kod tabanı **LF** satır sonuna normalize edildi.  
+- **Satır Sonu Standartlaştırma:**
+  `.gitattributes` eklendi ve tüm kod tabanı **LF** satır sonuna normalize edildi.
   Bu, platformlar arası uyumu artırır ve gereksiz diff değişikliklerini engeller.
 - **Yeni Router’lar:**
   - `app/routers/market.py` — Market verisi için API endpoint’leri

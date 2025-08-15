@@ -8,19 +8,17 @@ from logging.config import fileConfig
 
 from sqlalchemy import create_engine, pool
 from alembic import context
+from app.models import Base
+from app.config import Settings
 
 # Alembic config objesi
 config = context.config
 fileConfig(config.config_file_name)
 
 # -- Model metadata
-from app.models import Base
-
 target_metadata = Base.metadata
 
-# Ayarları okuyun
-from app.config import Settings
-
+# -- Ayarları oku
 settings = Settings()
 
 # Async URL'i sync hale getiriyoruz

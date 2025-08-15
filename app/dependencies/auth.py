@@ -17,10 +17,12 @@ async def get_current_user(request: Request):
     if not uid:
         raise HTTPException(status_code=401, detail="Giriş yapmalısınız.")
     async with async_session() as db:
-        row = (await db.execute(
-            text("SELECT id, email, name FROM users WHERE id=:id"),
-            {"id": uid},
-        )).first()
+        row = (
+            await db.execute(
+                text("SELECT id, email, name FROM users WHERE id=:id"),
+                {"id": uid},
+            )
+        ).first()
         if not row:
             raise HTTPException(status_code=401, detail="Kullanıcı bulunamadı.")
         first_name = (row[2] or "").strip().split(" ")[0].capitalize()
@@ -33,10 +35,12 @@ async def get_current_user_opt(request: Request):
     if not uid:
         return None
     async with async_session() as db:
-        row = (await db.execute(
-            text("SELECT id, email, name FROM users WHERE id=:id"),
-            {"id": uid},
-        )).first()
+        row = (
+            await db.execute(
+                text("SELECT id, email, name FROM users WHERE id=:id"),
+                {"id": uid},
+            )
+        ).first()
         if not row:
             return None
         first_name = (row[2] or "").strip().split(" ")[0].capitalize()

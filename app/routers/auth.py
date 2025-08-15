@@ -6,6 +6,7 @@ from fastapi.responses import RedirectResponse
 
 router = APIRouter()
 
+
 @router.get("/auth/logout")
 async def logout(request: Request):
     """

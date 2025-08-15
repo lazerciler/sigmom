@@ -1,6 +1,6 @@
 # SIGMOM-Signal-Alert-Interface
 
-SIGMOM, sinyal ve alarm arayüzü oluşturmaya yönelik bir Python projesidir.  
+SIGMOM, sinyal ve alarm arayüzü oluşturmaya yönelik bir Python projesidir.
 Proje, çeşitli sinyal ve uyarı işlemlerinin yönetilmesi ve izlenmesi amacıyla tasarlanmıştır.
 
 ## Özellikler
@@ -20,4 +20,3 @@ pip install -r requirements.txt
 Kullanım
 Ana Python dosyasını çalıştırarak sinyal ve uyarı arayüzünü başlatabilirsiniz.
 Daha fazla bilgi için kod ve dosya yapısını inceleyin.
-

@@ -32,14 +32,10 @@ class RawSignal(Base):
     )
 
     open_trades = relationship(
-        "StrategyOpenTrade",
-        back_populates="raw_signal",
-        cascade="all, delete-orphan"
+        "StrategyOpenTrade", back_populates="raw_signal", cascade="all, delete-orphan"
     )
     close_trades = relationship(
-        "StrategyTrade",
-        back_populates="raw_signal",
-        cascade="all, delete-orphan"
+        "StrategyTrade", back_populates="raw_signal", cascade="all, delete-orphan"
     )
 
 
@@ -48,13 +44,17 @@ class StrategyOpenTrade(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     public_id = Column(
-        String(36), default=lambda: str(uuid.uuid4()), unique=True, nullable=False, index=True
+        String(36),
+        default=lambda: str(uuid.uuid4()),
+        unique=True,
+        nullable=False,
+        index=True,
     )
     raw_signal_id = Column(
         BigInteger,
         ForeignKey("raw_signals.id", ondelete="CASCADE"),
         nullable=False,
-        index=True
+        index=True,
     )
     fund_manager_id = Column(String(64), nullable=False)
     symbol = Column(String(32), nullable=False)
@@ -79,9 +79,7 @@ class StrategyOpenTrade(Base):
 
     raw_signal = relationship("RawSignal", back_populates="open_trades")
     trades = relationship(
-        "StrategyTrade",
-        back_populates="open_trade",
-        cascade="all, delete-orphan"
+        "StrategyTrade", back_populates="open_trade", cascade="all, delete-orphan"
     )
 
 
@@ -90,19 +88,23 @@ class StrategyTrade(Base):
 
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     public_id = Column(
-        String(36), default=lambda: str(uuid.uuid4()), unique=True, nullable=False, index=True
+        String(36),
+        default=lambda: str(uuid.uuid4()),
+        unique=True,
+        nullable=False,
+        index=True,
     )
     raw_signal_id = Column(
         BigInteger,
         ForeignKey("raw_signals.id", ondelete="CASCADE"),
         nullable=False,
-        index=True
+        index=True,
     )
     open_trade_public_id = Column(
         String(36),
         ForeignKey("strategy_open_trades.public_id", ondelete="CASCADE"),
         nullable=False,
-        index=True
+        index=True,
     )
     fund_manager_id = Column(String(64), nullable=False)
     symbol = Column(String(32), nullable=False)

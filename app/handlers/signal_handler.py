@@ -5,6 +5,7 @@ import logging
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, Dict
+
 # from decimal import Decimal
 from app.schemas import WebhookSignal
 from app.utils.exchange_loader import load_execution_module
@@ -12,7 +13,7 @@ from crud.raw_signal import insert_raw_signal
 from crud.trade import (
     insert_strategy_open_trade,
     get_open_trade_for_close,
-    close_open_trade_and_record
+    close_open_trade_and_record,
 )
 
 logger = logging.getLogger(__name__)
@@ -23,7 +24,9 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
     logger.info(f"Order type: {signal_data.order_type}")
 
     if signal_data.order_type.lower() != "market":
-        logger.warning("Only market orders are supported. The transaction was rejected.")
+        logger.warning(
+            "Only market orders are supported. The transaction was rejected."
+        )
         raise HTTPException(
             status_code=400,
             detail="Limit orders are not currently supported by the system.",
@@ -44,8 +47,12 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
     if signal_data.mode == "open":
         try:
             if signal_data.leverage is not None:
-                await execution.order_handler.set_leverage(signal_data.symbol, signal_data.leverage)
-                logger.info(f"Leverage adjustment successfully: {signal_data.symbol} x{signal_data.leverage}")
+                await execution.order_handler.set_leverage(
+                    signal_data.symbol, signal_data.leverage
+                )
+                logger.info(
+                    f"Leverage adjustment successfully: {signal_data.symbol} x{signal_data.leverage}"
+                )
             else:
                 logger.debug(f"Leverage skipped (None): {signal_data.symbol}")
 
@@ -82,7 +89,9 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
 
     # CLOSE
     elif signal_data.mode == "close":
-        logger.info(f"CLOSE signal received → {signal_data.symbol} | {signal_data.exchange}")
+        logger.info(
+            f"CLOSE signal received → {signal_data.symbol} | {signal_data.exchange}"
+        )
 
         # 1) Kapatılacak open trade’i güvenli seç
         open_trade = await get_open_trade_for_close(
@@ -92,9 +101,14 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
             exchange=signal_data.exchange,
         )
         if open_trade is None:
-            logger.error("[CLOSE] No matching open position found (if there is no public id, "
-                         "the last open record is checked).")
-            return {"success": False, "message": "No open positions were found to be closed."}
+            logger.error(
+                "[CLOSE] No matching open position found (if there is no public id, "
+                "the last open record is checked)."
+            )
+            return {
+                "success": False,
+                "message": "No open positions were found to be closed.",
+            }
 
         # 2) Close emrini gönder (LEVERAGE YOK!)
         order_result = await execution.order_handler.place_order(signal_data)

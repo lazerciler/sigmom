@@ -22,10 +22,9 @@ async def insert_raw_signal(db: AsyncSession, signal: WebhookSignal) -> RawSigna
 
     # 2. Gelen db oturumuyla raw sinyali ekle
     json_payload = jsonable_encoder(signal)
-    db_signal = RawSignal(payload=json_payload,
-                          fund_manager_id=signal.fund_manager_id)
+    db_signal = RawSignal(payload=json_payload, fund_manager_id=signal.fund_manager_id)
     db.add(db_signal)
     # Eğer dışarıda begin() yoksa burada flush/commit gerekebilir:
-    await db.flush()    # db_signal.id atanır
+    await db.flush()  # db_signal.id atanır
     # await db.commit()  # commit işini üst kata bırakmak daha esnek olabilir
     return db_signal

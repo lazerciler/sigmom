@@ -31,7 +31,9 @@ async def verify_closed_trades_for_execution(db: AsyncSession, execution):
 
         amt = Decimal(str((pos or {}).get("positionAmt", "0"))).copy_abs()
         if amt == 0:
-            logger.info(f"[closed-verify] {trade.symbol} → borsada pozisyon yok; kapanış kaydı yapılıyor.")
+            logger.info(
+                f"[closed-verify] {trade.symbol} → borsada pozisyon yok; kapanış kaydı yapılıyor."
+            )
             await close_open_trade_and_record(db, trade, pos)
         else:
             logger.debug(f"[closed-verify] {trade.symbol} → hâlâ açık (amt={amt}).")

@@ -17,7 +17,7 @@ templates = Jinja2Templates(directory="app/templates")
 async def panel(request: Request, user=Depends(get_current_user_opt)):
     if user:
         name = (user.get("name") or "").strip()
-        email = (user.get("email") or "")
+        email = user.get("email") or ""
         display_name = name if name else (email.split("@")[0] if email else "")
     else:
         display_name = "Ziyaretçi"
@@ -31,12 +31,17 @@ async def panel(request: Request, user=Depends(get_current_user_opt)):
         referral_verified = False
         if user:
             # CLAIMED kodu var mı?
-            row = await db.execute(text("""
+            row = await db.execute(
+                text(
+                    """
                 SELECT 1
                 FROM referral_codes
                 WHERE used_by_user_id = :uid AND status = 'CLAIMED'
                 LIMIT 1
-            """), {"uid": user["id"]})
+            """
+                ),
+                {"uid": user["id"]},
+            )
             referral_verified = row.first() is not None
 
     ctx = {

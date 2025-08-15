@@ -30,7 +30,9 @@ from app.services.referral_maintenance import cleanup_expired_reserved
 
 
 REQUIRED_PYTHON = (3, 9)
-if sys.version_info[:2] != REQUIRED_PYTHON:  # Sadece major.minor versiyonunu kontrol eder (3.9.x)
+if (
+    sys.version_info[:2] != REQUIRED_PYTHON
+):  # Sadece major.minor versiyonunu kontrol eder (3.9.x)
     sys.exit(
         f"Bu uygulama sadece Python {REQUIRED_PYTHON[0]}.{REQUIRED_PYTHON[1]} ile çalışır.\n"
         f"Kullandığınız versiyon: {sys.version.split()[0]}\n"
@@ -45,7 +47,9 @@ verifier_logger = logging.getLogger("verifier")
 app = FastAPI(title="SIGMOM Signal Interface", version="1.0.0")
 
 # Session middleware
-app.add_middleware(SessionMiddleware, secret_key=settings.SESSION_SECRET, same_site="lax")
+app.add_middleware(
+    SessionMiddleware, secret_key=settings.SESSION_SECRET, same_site="lax"
+)
 
 # Statik ve router mount
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
@@ -58,32 +62,32 @@ app.include_router(admin_referrals.router)
 app.include_router(auth.router)
 app.include_router(market.router)
 
+
 def setup_logging():
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
     SQLA_ECHO = os.getenv("SQLA_ECHO", "0") == "1"
     VERIFIER_LEVEL = os.getenv("VERIFIER_LEVEL", "INFO").upper()
 
-    logging.config.dictConfig({
-        "version": 1,
-        "disable_existing_loggers": False,
-        "formatters": {
-            "std": {"format": "%(asctime)s %(levelname)s:%(name)s:%(message)s"}
-        },
-        "handlers": {
-            "console": {
-                "class": "logging.StreamHandler",
-                "formatter": "std"
-            }
-        },
-        "loggers": {
-            "": {"handlers": ["console"], "level": LOG_LEVEL},
-            "httpx": {"level": "WARNING"},
-            "aiomysql": {"level": "WARNING"},
-            "uvicorn.access": {"level": "WARNING"},
-            "sqlalchemy.engine": {"level": "INFO" if SQLA_ECHO else "WARNING"},
-            "verifier": {"level": VERIFIER_LEVEL}
+    logging.config.dictConfig(
+        {
+            "version": 1,
+            "disable_existing_loggers": False,
+            "formatters": {
+                "std": {"format": "%(asctime)s %(levelname)s:%(name)s:%(message)s"}
+            },
+            "handlers": {
+                "console": {"class": "logging.StreamHandler", "formatter": "std"}
+            },
+            "loggers": {
+                "": {"handlers": ["console"], "level": LOG_LEVEL},
+                "httpx": {"level": "WARNING"},
+                "aiomysql": {"level": "WARNING"},
+                "uvicorn.access": {"level": "WARNING"},
+                "sqlalchemy.engine": {"level": "INFO" if SQLA_ECHO else "WARNING"},
+                "verifier": {"level": VERIFIER_LEVEL},
+            },
         }
-    })
+    )
 
 
 setup_logging()
@@ -133,7 +137,9 @@ async def verifier_loop(poll_interval: int = 5, cleanup_interval_sec: int = 10 *
                     async with s.begin():
                         n = await cleanup_expired_reserved(s)
                 if n:
-                    verifier_logger.info("Referral expiry cleanup: %s satır temizlendi", n)
+                    verifier_logger.info(
+                        "Referral expiry cleanup: %s satır temizlendi", n
+                    )
             except Exception as exc:
                 verifier_logger.exception("Referral expiry cleanup hata: %s", exc)
             last_cleanup_ts = now_ts
@@ -145,6 +151,8 @@ async def verifier_loop(poll_interval: int = 5, cleanup_interval_sec: int = 10 *
 async def startup_event():
     asyncio.create_task(verifier_loop())
 
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

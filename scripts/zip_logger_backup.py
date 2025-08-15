@@ -19,9 +19,17 @@ HASH_LOG = os.path.join(BACKUP_DIR, "hash_log.txt")
 # Yedeklenecek dosya uzantıları
 INCLUDE_EXTENSIONS = {".py", ".sql", ".txt", ".md", ".example", ".ini", ".mako"}
 # Yedeklenmeyecek klasörler
-EXCLUDE_DIRS = {"__pycache__", ".git", ".idea", "scripts", "venv", os.path.basename(BACKUP_DIR)}
+EXCLUDE_DIRS = {
+    "__pycache__",
+    ".git",
+    ".idea",
+    "scripts",
+    "venv",
+    os.path.basename(BACKUP_DIR),
+}
 # Yedeklenmeyecek dosyalar
 EXCLUDE_FILES = {".DS_Store", ".env"}
+
 
 # === Yardımcı Fonksiyonlar ===
 def get_file_hash(filepath: str) -> str:

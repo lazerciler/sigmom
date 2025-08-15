@@ -19,7 +19,9 @@ class VerifyIn(BaseModel):
     code: str
 
     # Field değil, sınıf sabiti:
-    code_re: ClassVar[Pattern[str]] = re.compile(r'^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$')
+    code_re: ClassVar[Pattern[str]] = re.compile(
+        r"^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$"
+    )
 
     @validator("code", pre=True)
     def normalize_and_validate(cls, v: str) -> str:
@@ -46,23 +48,33 @@ async def verify_referral(
     async with async_session() as db:
         async with db.begin():
             # 0) idempotent
-            already = await db.execute(text("""
+            already = await db.execute(
+                text(
+                    """
                 SELECT 1
                 FROM referral_codes
                 WHERE used_by_user_id = :uid AND status = 'CLAIMED'
                 LIMIT 1
-            """), {"uid": user["id"]})
+            """
+                ),
+                {"uid": user["id"]},
+            )
             if already.first():
                 return {"ok": True}
 
             # 1) Adaylar: SADECE bu e-postaya tahsisli + süresi geçmemiş
-            res = await db.execute(text("""
+            res = await db.execute(
+                text(
+                    """
                 SELECT id, code_hash
                 FROM referral_codes
                 WHERE status = 'RESERVED'
                   AND LOWER(TRIM(email_reserved)) = :email
                   AND (expires_at IS NULL OR expires_at > :now)
-            """), {"email": email_norm, "now": now})
+            """
+                ),
+                {"email": email_norm, "now": now},
+            )
             rows = res.all()
 
             # # --- GEÇİCİ TEŞHİS ---
@@ -70,7 +82,7 @@ async def verify_referral(
             # print("verify candidates:", [r[0] for r in rows])
 
             # 2) Bcrypt ile plaintext eşleşmesi
-            bcrypt_re = re.compile(r'^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$')
+            bcrypt_re = re.compile(r"^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$")
             match_id = None
             raw = code.encode("utf-8")
             for rid, chash in rows:
@@ -82,10 +94,14 @@ async def verify_referral(
                     break
 
             if not match_id:
-                raise HTTPException(400, "Kod bulunamadı veya size tahsisli/aktif değil.")
+                raise HTTPException(
+                    400, "Kod bulunamadı veya size tahsisli/aktif değil."
+                )
 
             # 3) Koşullu CLAIM (Unlimited: expires_at=NULL)
-            result = await db.execute(text("""
+            result = await db.execute(
+                text(
+                    """
                 UPDATE referral_codes
                 SET status='CLAIMED',
                     used_by_user_id=:uid,
@@ -95,16 +111,23 @@ async def verify_referral(
                   AND status='RESERVED'
                   AND LOWER(TRIM(email_reserved)) = :email
                   AND (expires_at IS NULL OR expires_at > :now)
-            """), {"uid": user["id"], "email": email_norm, "now": now, "rid": match_id})
+            """
+                ),
+                {"uid": user["id"], "email": email_norm, "now": now, "rid": match_id},
+            )
 
             print("verify update rowcount:", result.rowcount)  # --- GEÇİCİ TEŞHİS ---
 
             if result.rowcount == 0:
-                raise HTTPException(409, "Kod artık uygun değil. Lütfen tekrar deneyin.")
+                raise HTTPException(
+                    409, "Kod artık uygun değil. Lütfen tekrar deneyin."
+                )
 
             # 4) Kullanıcıyı işaretle
             await db.execute(
-                text("UPDATE users SET referral_verified_at=:now, updated_at=:now WHERE id=:uid"),
+                text(
+                    "UPDATE users SET referral_verified_at=:now, updated_at=:now WHERE id=:uid"
+                ),
                 {"now": now, "uid": user["id"]},
             )
 

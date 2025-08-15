@@ -32,9 +32,7 @@ async def set_leverage(symbol: str, leverage: int) -> dict:
     # Imzalı query string oluştur
     query = urlencode(sorted(params.items()))
     signature = hmac.new(
-        API_SECRET.encode('utf-8'),
-        query.encode('utf-8'),
-        hashlib.sha256
+        API_SECRET.encode("utf-8"), query.encode("utf-8"), hashlib.sha256
     ).hexdigest()
     full_query = f"{query}&signature={signature}"
 
@@ -62,9 +60,7 @@ def sign_payload(params: dict) -> str:
         raise TypeError("Payload must be a dictionary.")
     query = urlencode(sorted(params.items()))
     return hmac.new(
-        API_SECRET.encode('utf-8'),
-        query.encode('utf-8'),
-        hashlib.sha256
+        API_SECRET.encode("utf-8"), query.encode("utf-8"), hashlib.sha256
     ).hexdigest()
 
 
@@ -73,6 +69,7 @@ def get_signed_headers() -> dict:
     Binance API anahtarını header olarak döner.
     """
     return {"X-MBX-APIKEY": API_KEY}
+
 
 async def get_binance_server_time() -> int:
     """
@@ -104,6 +101,6 @@ async def adjust_quantity(symbol: str, quantity: float) -> str:
 
             adjusted = max(Decimal(str(quantity)), min_qty)
             adjusted = adjusted.quantize(step_size, rounding=ROUND_DOWN)
-            return format(adjusted, 'f')
+            return format(adjusted, "f")
 
     raise ValueError(f"Symbol {symbol} not found in exchangeInfo")

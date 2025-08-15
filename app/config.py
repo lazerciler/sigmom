@@ -42,7 +42,9 @@ class Settings(BaseSettings):
     # Google OAuth
     GOOGLE_CLIENT_ID: str = Field(..., env="GOOGLE_CLIENT_ID")
     GOOGLE_CLIENT_SECRET: str = Field(..., env="GOOGLE_CLIENT_SECRET")
-    GOOGLE_REDIRECT_URI: str = Field("http://localhost:8000/auth/google/callback", env="GOOGLE_REDIRECT_URI")
+    GOOGLE_REDIRECT_URI: str = Field(
+        "http://localhost:8000/auth/google/callback", env="GOOGLE_REDIRECT_URI"
+    )
     ADMIN_EMAILS: str = Field("", env="ADMIN_EMAILS")
 
     # Session Secret

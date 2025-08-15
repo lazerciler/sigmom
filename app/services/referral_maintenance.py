@@ -4,6 +4,7 @@
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+
 async def cleanup_expired_reserved(db: AsyncSession) -> int:
     """
     Tahsis süresi geçmiş RESERVED kayıtları tamamen boşa (AVAILABLE) çevirir.
@@ -13,7 +14,9 @@ async def cleanup_expired_reserved(db: AsyncSession) -> int:
       - expires_at NOT NULL ve geçmişte
     Dönüş: güncellenen satır sayısı
     """
-    result = await db.execute(text("""
+    result = await db.execute(
+        text(
+            """
         UPDATE referral_codes
         SET status='AVAILABLE',
             email_reserved=NULL,
@@ -22,5 +25,7 @@ async def cleanup_expired_reserved(db: AsyncSession) -> int:
           AND email_reserved IS NOT NULL
           AND expires_at IS NOT NULL
           AND expires_at < NOW()
-    """))
+    """
+        )
+    )
     return result.rowcount

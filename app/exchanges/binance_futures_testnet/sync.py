@@ -28,7 +28,9 @@ async def get_open_position(symbol: str) -> dict:
         headers = {"X-MBX-APIKEY": API_KEY}
 
         async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(url, params={**params, "signature": signature}, headers=headers)
+            resp = await client.get(
+                url, params={**params, "signature": signature}, headers=headers
+            )
             resp.raise_for_status()
             data = resp.json()
 
@@ -37,11 +39,15 @@ async def get_open_position(symbol: str) -> dict:
         for p in positions:
             if p.get("symbol") == symbol.upper():
                 amt = p.get("positionAmt", "0")
-                side = "long" if float(amt) > 0 else "short" if float(amt) < 0 else "flat"
+                side = (
+                    "long" if float(amt) > 0 else "short" if float(amt) < 0 else "flat"
+                )
                 return {
                     "success": True,
                     "symbol": p.get("symbol"),
-                    "positionAmt": str(p.get("positionAmt", "0")),   # string dön → üst katmanda Decimal
+                    "positionAmt": str(
+                        p.get("positionAmt", "0")
+                    ),  # string dön → üst katmanda Decimal
                     "entryPrice": str(p.get("entryPrice", "0")),
                     "leverage": str(p.get("leverage", "0")),
                     "unRealizedProfit": str(p.get("unRealizedProfit", "0")),
@@ -53,4 +59,3 @@ async def get_open_position(symbol: str) -> dict:
     except Exception as e:
         logger.exception("Error while fetching open position")
         return {"success": False, "message": str(e)}
-

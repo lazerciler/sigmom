@@ -14,13 +14,14 @@ from .utils import (
     get_signed_headers,
     get_binance_server_time,
     adjust_quantity,
-    set_leverage
 )
 
 logger = logging.getLogger(__name__)
 
 
-def build_open_trade_model(signal_data, order_response, raw_signal_id: int) -> StrategyOpenTrade:
+def build_open_trade_model(
+    signal_data, order_response, raw_signal_id: int
+) -> StrategyOpenTrade:
     return StrategyOpenTrade(
         public_id=str(uuid.uuid4()),
         raw_signal_id=raw_signal_id,
@@ -87,7 +88,9 @@ async def place_order(signal_data: WebhookSignal) -> dict:
             response.raise_for_status()
             return {"success": True, "data": response.json()}
     except httpx.HTTPStatusError as exc:
-        logger.error(f"Binance API Error {exc.response.status_code}: {exc.response.text}")
+        logger.error(
+            f"Binance API Error {exc.response.status_code}: {exc.response.text}"
+        )
         return {"success": False, "message": exc.response.text, "data": {}}
     except Exception as e:
         logger.exception("Unexpected error occurred while placing order.")
@@ -153,17 +156,10 @@ async def query_order_status(symbol: str, order_id: str) -> dict:
             data = response.json()
 
         if response.status_code == 200:
-            return {
-                "success": True,
-                "status": data.get("status"),
-                "data": data
-            }
+            return {"success": True, "status": data.get("status"), "data": data}
         else:
             logger.error(f"Binance order query failed: {data}")
-            return {
-                "success": False,
-                "message": data.get("msg", "Unknown error")
-            }
+            return {"success": False, "message": data.get("msg", "Unknown error")}
 
     except Exception as e:
         logger.exception("An error occurred during the Binance order status query.")

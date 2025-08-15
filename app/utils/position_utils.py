@@ -10,7 +10,9 @@ from app.models import StrategyOpenTrade
 logger = logging.getLogger("verifier")
 
 
-async def confirm_open_trade(db: AsyncSession, trade: StrategyOpenTrade, position_data: dict):
+async def confirm_open_trade(
+    db: AsyncSession, trade: StrategyOpenTrade, position_data: dict
+):
     """
     Pozisyon borsada gerçekten açıldıysa, bu bilgiyi trade objesine işler ve veritabanına yazar.
     """
@@ -26,7 +28,9 @@ async def confirm_open_trade(db: AsyncSession, trade: StrategyOpenTrade, positio
         .values(entry_price=entry_price)
     )
     await db.flush()
-    logger.info(f"[confirm_open_trade] Entry price güncellendi: {trade.symbol} → {entry_price}")
+    logger.info(
+        f"[confirm_open_trade] Entry price güncellendi: {trade.symbol} → {entry_price}"
+    )
 
 
 def position_matches(position: dict) -> bool:
@@ -37,5 +41,7 @@ def position_matches(position: dict) -> bool:
 
     has_position = amt > Decimal("0")
 
-    logger.debug(f"🔍 Pozisyon durumu → has_position={has_position}, positionAmt={amt}, entryPrice={entry_price}")
+    logger.debug(
+        f"🔍 Pozisyon durumu → has_position={has_position}, positionAmt={amt}, entryPrice={entry_price}"
+    )
     return has_position

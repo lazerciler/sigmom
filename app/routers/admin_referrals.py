@@ -12,7 +12,6 @@ import bcrypt
 import secrets
 import string
 import pyzipper
-from typing import Optional
 
 from app.database import async_session
 from app.dependencies.auth import get_current_user, require_admin
@@ -21,13 +20,19 @@ templates = Jinja2Templates(directory="app/templates")
 router = APIRouter(prefix="/admin/referrals", tags=["admin-referrals"])
 
 ALPH = string.ascii_uppercase + string.digits
+
+
 def _gen_plain():
     return "-".join("".join(secrets.choice(ALPH) for _ in range(4)) for _ in range(3))
+
 
 async def _fetch_panel_data():
     async with async_session() as db:
         # Kullanıcı listesi: claimed + reserved görünümü
-        users = (await db.execute(text("""
+        users = (
+            await db.execute(
+                text(
+                    """
             SELECT
               u.id,
               u.email,
@@ -57,10 +62,16 @@ async def _fetch_panel_data():
             FROM users u
             ORDER BY u.created_at DESC
             LIMIT 200
-        """))).all()
+        """
+                )
+            )
+        ).all()
 
         # Kod listesi: kime rezerve edildiğini göstermek için user join
-        codes = (await db.execute(text("""
+        codes = (
+            await db.execute(
+                text(
+                    """
             SELECT
               rc.id,
               rc.status,
@@ -73,16 +84,25 @@ async def _fetch_panel_data():
               ON u.email = rc.email_reserved
             ORDER BY rc.id DESC
             LIMIT 300
-        """))).all()
+        """
+                )
+            )
+        ).all()
 
         # Free pool: SADECE AVAILABLE
-        free_codes = (await db.execute(text("""
+        free_codes = (
+            await db.execute(
+                text(
+                    """
             SELECT id
             FROM referral_codes
             WHERE status='AVAILABLE'
             ORDER BY id DESC
             LIMIT 50
-        """))).all()
+        """
+                )
+            )
+        ).all()
 
     return users, codes, free_codes
 
@@ -91,13 +111,17 @@ async def _fetch_panel_data():
 async def panel(request: Request, current_user=Depends(get_current_user)):
     require_admin(current_user)
     users, codes, free_codes = await _fetch_panel_data()
-    return templates.TemplateResponse("admin_referrals.html", {
-        "request": request,
-        "users": users,
-        "codes": codes,
-        "free_codes": free_codes,
-        "current_user": current_user
-    })
+    return templates.TemplateResponse(
+        "admin_referrals.html",
+        {
+            "request": request,
+            "users": users,
+            "codes": codes,
+            "free_codes": free_codes,
+            "current_user": current_user,
+        },
+    )
+
 
 # Expiry temizliği için manuel buton/endpoint'i (hemen çalıştır-gör)
 @router.post("/expire_cleanup", response_class=HTMLResponse)
@@ -108,7 +132,10 @@ async def expire_cleanup(
     require_admin(current_user)
     async with async_session() as db:
         async with db.begin():
-            result = await db.execute(text("""
+            # result = await db.execute(
+            await db.execute(
+                text(
+                    """
                 UPDATE referral_codes
                 SET status='AVAILABLE',
                     email_reserved=NULL,
@@ -117,7 +144,9 @@ async def expire_cleanup(
                   AND email_reserved IS NOT NULL
                   AND expires_at IS NOT NULL
                   AND expires_at < NOW()
-            """))
+            """
+                )
+            )
         # result.rowcount ile kaç satırın temizlendiğini görmek istersen loglayabilirsin
     return await panel(request, current_user)
 
@@ -126,8 +155,8 @@ async def expire_cleanup(
 async def assign(
     request: Request,
     email: str = Form(...),
-    referral_id: int = Form(...),      # ikisi de ZORUNLU
-    plain_code: str = Form(...),       # ikisi de ZORUNLU
+    referral_id: int = Form(...),  # ikisi de ZORUNLU
+    plain_code: str = Form(...),  # ikisi de ZORUNLU
     current_user=Depends(get_current_user),
 ):
     require_admin(current_user)
@@ -144,10 +173,12 @@ async def assign(
     async with async_session() as db:
         async with db.begin():
             # Kullanıcıyı al/oluştur (kilitle)
-            row = (await db.execute(
-                text("SELECT id FROM users WHERE email=:e FOR UPDATE"),
-                {"e": email},
-            )).first()
+            row = (
+                await db.execute(
+                    text("SELECT id FROM users WHERE email=:e FOR UPDATE"),
+                    {"e": email},
+                )
+            ).first()
             if row:
                 uid = row[0]
                 await db.execute(
@@ -156,21 +187,30 @@ async def assign(
                 )
             else:
                 await db.execute(
-                    text("""
+                    text(
+                        """
                         INSERT INTO users (email, is_active, created_at, updated_at)
                         VALUES (:e, 1, :t, :t)
-                    """),
+                    """
+                    ),
                     {"e": email, "t": now},
                 )
                 uid = (await db.execute(text("SELECT LAST_INSERT_ID()"))).first()[0]
 
             # Seçilen ID'yi kilitle ve hash'i getir
-            row = (await db.execute(text("""
+            row = (
+                await db.execute(
+                    text(
+                        """
                 SELECT id, code_hash, status, email_reserved, expires_at
                 FROM referral_codes
                 WHERE id=:rid
                 FOR UPDATE
-            """), {"rid": referral_id})).first()
+            """
+                    ),
+                    {"rid": referral_id},
+                )
+            ).first()
             if not row:
                 raise HTTPException(400, "Kod bulunamadı.")
 
@@ -189,14 +229,20 @@ async def assign(
                 raise HTTPException(400, "Düz kod doğrulanamadı.")
 
             # Başka e-postaya tahsisli RESERVED ise engelle
-            if status == "RESERVED" and email_res and email_res.strip().lower() != email:
+            if (
+                status == "RESERVED"
+                and email_res
+                and email_res.strip().lower() != email
+            ):
                 raise HTTPException(400, "Kod farklı bir e-posta için tahsisli.")
 
             # Süresi geçmiş RESERVED ise, admin rezerve edebiliriz → yeni süre yaz
             # AVAILABLE ise de yeni rezerv süresi yazacağız.
 
             # === RESERVE === (CLAIM YOK)
-            await db.execute(text("""
+            await db.execute(
+                text(
+                    """
                 UPDATE referral_codes
                 SET status='RESERVED',
                     email_reserved=:email,
@@ -204,7 +250,10 @@ async def assign(
                     used_by_user_id=NULL,
                     used_at=NULL
                 WHERE id=:rid AND status!='CLAIMED'
-            """), {"email": email, "exp": exp_new, "rid": referral_id})
+            """
+                ),
+                {"email": email, "exp": exp_new, "rid": referral_id},
+            )
 
     # Paneli tazele
     return await panel(request, current_user)
@@ -222,19 +271,28 @@ async def unassign(
     async with async_session() as db:
         async with db.begin():
             # 1) Kullanıcının son CLAIMED kodunu kilitleyerek al
-            row = (await db.execute(text("""
+            row = (
+                await db.execute(
+                    text(
+                        """
                 SELECT id FROM referral_codes
                 WHERE used_by_user_id=:uid AND status='CLAIMED'
                 ORDER BY used_at DESC
                 LIMIT 1
                 FOR UPDATE
-            """), {"uid": user_id})).first()
+            """
+                    ),
+                    {"uid": user_id},
+                )
+            ).first()
             if not row:
                 raise HTTPException(400, "Kullanıcıda bağlı CLAIMED kod bulunamadı.")
             rid = row[0]
 
             # 2) Kodu tamamen boşa çıkar: AVAILABLE + tüm tahsis/claim alanlarını temizle
-            result = await db.execute(text("""
+            result = await db.execute(
+                text(
+                    """
                 UPDATE referral_codes
                 SET status='AVAILABLE',
                     email_reserved=NULL,
@@ -242,14 +300,21 @@ async def unassign(
                     used_by_user_id=NULL,
                     used_at=NULL
                 WHERE id=:rid AND status='CLAIMED'
-            """), {"rid": rid})
+            """
+                ),
+                {"rid": rid},
+            )
 
             if result.rowcount == 0:
                 # Yarış durumu: kayıt CLAIMED değilse vs.
-                raise HTTPException(409, "Kod bu sırada değişti; lütfen tekrar deneyin.")
+                raise HTTPException(
+                    409, "Kod bu sırada değişti; lütfen tekrar deneyin."
+                )
 
             # 3) Kullanıcıda başka CLAIMED yoksa, üyelik damgasını da temizle
-            await db.execute(text("""
+            await db.execute(
+                text(
+                    """
                 UPDATE users
                 SET referral_verified_at=NULL, updated_at=:t
                 WHERE id=:uid
@@ -257,7 +322,10 @@ async def unassign(
                       SELECT 1 FROM referral_codes
                       WHERE used_by_user_id=:uid AND status='CLAIMED'
                   )
-            """), {"t": now, "uid": user_id})
+            """
+                ),
+                {"t": now, "uid": user_id},
+            )
 
     return await panel(request, current_user)
 
@@ -266,10 +334,10 @@ async def unassign(
 async def generate(
     request: Request,
     count: int = Form(...),
-    days: int = Form(14),                 # NOT: AVAILABLE üretimde kullanılmıyor (rezerve yok)
-    email_reserved: str = Form(None),     # NOT: AVAILABLE üretimde kullanılmıyor
-    mode: str = Form("download"),         # "download" | "zip"
-    zip_password: str = Form(None),       # ZIP için opsiyonel parola
+    days: int = Form(14),  # NOT: AVAILABLE üretimde kullanılmıyor (rezerve yok)
+    email_reserved: str = Form(None),  # NOT: AVAILABLE üretimde kullanılmıyor
+    mode: str = Form("download"),  # "download" | "zip"
+    zip_password: str = Form(None),  # ZIP için opsiyonel parola
     current_user=Depends(get_current_user),
 ):
     """
@@ -280,7 +348,9 @@ async def generate(
     """
     admin = require_admin(current_user)
     count = max(1, min(100, int(count or 1)))
-    days = max(1, min(180, int(days or 14)))  # AVAILABLE modda kullanılmıyor; parametre uyumluluğu için tutuldu
+    days = max(
+        1, min(180, int(days or 14))
+    )  # AVAILABLE modda kullanılmıyor; parametre uyumluluğu için tutuldu
     email_reserved = (email_reserved or "").strip().lower() or None
 
     created = []
@@ -290,18 +360,19 @@ async def generate(
             for _ in range(count):
                 plain = _gen_plain()
                 code_hash = bcrypt.hashpw(
-                    plain.strip().upper().encode("utf-8"),
-                    bcrypt.gensalt()
+                    plain.strip().upper().encode("utf-8"), bcrypt.gensalt()
                 ).decode("utf-8")
 
                 # status sütununu yazmıyoruz → DEFAULT 'AVAILABLE'
                 await db.execute(
-                    text("""
+                    text(
+                        """
                         INSERT INTO referral_codes
                           (code_hash, email_reserved, tier, invited_by_admin_id, expires_at)
                         VALUES
                           (:h, NULL, 'default', :admin_id, NULL)
-                    """),
+                    """
+                    ),
                     {"h": code_hash, "admin_id": admin["id"]},
                 )
 
@@ -323,9 +394,10 @@ async def generate(
         # Şifreli ZIP (AES)
         zip_stream = BytesIO()
         with pyzipper.AESZipFile(
-            zip_stream, "w",
+            zip_stream,
+            "w",
             compression=pyzipper.ZIP_DEFLATED,
-            encryption=pyzipper.WZ_AES
+            encryption=pyzipper.WZ_AES,
         ) as zf:
             if zip_password:
                 zf.setpassword(zip_password.encode("utf-8"))
@@ -335,14 +407,18 @@ async def generate(
             "Content-Disposition": f'attachment; filename="referrals_plain_{ts}.zip"',
             "X-Content-Type-Options": "nosniff",
         }
-        return StreamingResponse(zip_stream, media_type="application/zip", headers=headers)
+        return StreamingResponse(
+            zip_stream, media_type="application/zip", headers=headers
+        )
 
     # Varsayılan: düz CSV indir
     headers = {
         "Content-Disposition": f'attachment; filename="referrals_plain_{ts}.csv"',
         "X-Content-Type-Options": "nosniff",
     }
-    return StreamingResponse(iter([csv_bytes]), media_type="application/octet-stream", headers=headers)
+    return StreamingResponse(
+        iter([csv_bytes]), media_type="application/octet-stream", headers=headers
+    )
 
 
 @router.get("/export")
@@ -358,7 +434,10 @@ async def export(current_user=Depends(get_current_user)):
     buf.write("user_id,email,referral_id,is_claimed,used_at\n")
 
     async with async_session() as db:
-        rows = (await db.execute(text("""
+        rows = (
+            await db.execute(
+                text(
+                    """
             SELECT
                 u.id,
                 u.email,
@@ -383,14 +462,21 @@ async def export(current_user=Depends(get_current_user)):
                 ) AS used_at
             FROM users u
             ORDER BY u.id ASC
-        """))).all()
+        """
+                )
+            )
+        ).all()
 
     for uid, email, ref_id, is_claimed, used_at in rows:
         used_at_str = used_at.isoformat() + "Z" if used_at else ""
-        buf.write(f"{uid},{email},{ref_id or ''},{1 if is_claimed else 0},{used_at_str}\n")
+        buf.write(
+            f"{uid},{email},{ref_id or ''},{1 if is_claimed else 0},{used_at_str}\n"
+        )
 
     headers = {
         # ISO dosya adında ':' sorun çıkarabilir → güvenli timestamp
         "Content-Disposition": f'attachment; filename="referrals_{datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")}.csv"'
     }
-    return StreamingResponse(iter([buf.getvalue()]), media_type="text/csv", headers=headers)
+    return StreamingResponse(
+        iter([buf.getvalue()]), media_type="text/csv", headers=headers
+    )

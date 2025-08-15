@@ -1,10 +1,11 @@
 """Replace order_id with raw_signal_id
 
 Revision ID: b28b0c0848ea
-Revises: 
+Revises:
 Create Date: 2025-07-27 02:07:56.932966
 
 """
+
 from typing import Sequence, Union
 
 from alembic import op

@@ -12,6 +12,7 @@ from app.models import StrategyOpenTrade, StrategyTrade
 from app.utils.position_utils import position_matches, confirm_open_trade
 from sqlalchemy import text
 
+
 async def get_open_trade_for_close(
     db: AsyncSession,
     public_id: Optional[str],  # str | None yerine Optional[str]
@@ -60,14 +61,18 @@ async def get_open_trade_for_close(
             StrategyOpenTrade.exchange == ex,
             StrategyOpenTrade.status == "open",
         )
-        .order_by(desc(StrategyOpenTrade.id))  # id is monotonic; avoids timestamp issues
+        .order_by(
+            desc(StrategyOpenTrade.id)
+        )  # id is monotonic; avoids timestamp issues
     )
 
     res = await db.execute(q)
     return res.scalars().first()
 
 
-async def close_open_trade_and_record(db: AsyncSession, trade: StrategyOpenTrade, position_data: dict):
+async def close_open_trade_and_record(
+    db: AsyncSession, trade: StrategyOpenTrade, position_data: dict
+):
     """
     Açık pozisyon kapanmışsa:
     - PnL hesaplanır,
@@ -77,13 +82,17 @@ async def close_open_trade_and_record(db: AsyncSession, trade: StrategyOpenTrade
     logger = logging.getLogger("verifier")
 
     try:
-        close_price = Decimal(str(position_data.get("markPrice") or position_data.get("entryPrice") or 0))
+        close_price = Decimal(
+            str(position_data.get("markPrice") or position_data.get("entryPrice") or 0)
+        )
         open_price = trade.entry_price
         position_size = trade.position_size
 
-        pnl = (close_price - open_price) * position_size \
-            if trade.side.lower() == "long" \
+        pnl = (
+            (close_price - open_price) * position_size
+            if trade.side.lower() == "long"
             else (open_price - close_price) * position_size
+        )
 
         closed_trade = StrategyTrade(
             public_id=str(uuid.uuid4()),
@@ -122,28 +131,38 @@ async def close_open_trade_and_record(db: AsyncSession, trade: StrategyOpenTrade
         # Commit sonrası doğrulama
         try:
             result = await db.execute(
-                text("""
-                    SELECT id, public_id, symbol, realized_pnl 
-                    FROM strategy_trades 
+                text(
+                    """
+                    SELECT id, public_id, symbol, realized_pnl
+                    FROM strategy_trades
                     WHERE open_trade_public_id = :otpid
                     ORDER BY id DESC LIMIT 1
-                """),
-                {"otpid": trade.public_id}
+                """
+                ),
+                {"otpid": trade.public_id},
             )
             row = result.fetchone()
             if row:
-                logger.info(f"[DB-VERIFY] Trade kaydı bulundu → ID: {row.id}, "
-                            f"Symbol: {row.symbol}, PnL: {row.realized_pnl}")
+                logger.info(
+                    f"[DB-VERIFY] Trade kaydı bulundu → ID: {row.id}, "
+                    f"Symbol: {row.symbol}, PnL: {row.realized_pnl}"
+                )
             else:
-                logger.warning(f"[DB-VERIFY] Commit sonrası trade kaydı BULUNAMADI! → open_trade_public_id={trade.public_id}")
+                logger.warning(
+                    f"[DB-VERIFY] Commit sonrası trade kaydı BULUNAMADI! → open_trade_public_id={trade.public_id}"
+                )
         except Exception as e:
             logger.exception(f"[DB-VERIFY-FAIL] {e}")
 
-        logger.info(f"[closed-recorded] {trade.symbol} → PnL: {pnl:.2f} was written and open trade status set to CLOSED.")
+        logger.info(
+            f"[closed-recorded] {trade.symbol} → PnL: {pnl:.2f} was written and open trade status set to CLOSED."
+        )
 
     except Exception as e:
         await db.rollback()
-        logger.exception(f"[close-fail] {trade.symbol} position closing record failed: {e}")
+        logger.exception(
+            f"[close-fail] {trade.symbol} position closing record failed: {e}"
+        )
 
 
 async def increment_attempt_count(db: AsyncSession, trade_id: int) -> StrategyOpenTrade:
@@ -156,7 +175,9 @@ async def increment_attempt_count(db: AsyncSession, trade_id: int) -> StrategyOp
         )
     )
     # Değişikliği yaptıktan sonra modeli geri çekip return etmelisin
-    result = await db.execute(select(StrategyOpenTrade).where(StrategyOpenTrade.id == trade_id))
+    result = await db.execute(
+        select(StrategyOpenTrade).where(StrategyOpenTrade.id == trade_id)
+    )
     trade = result.scalar_one()
     return trade
 
@@ -194,7 +215,9 @@ async def mark_trade_as_failed(db: AsyncSession, trade: StrategyOpenTrade):
     )
 
 
-async def verify_pending_trades_for_execution(db: AsyncSession, execution, max_retries: int = 3):
+async def verify_pending_trades_for_execution(
+    db: AsyncSession, execution, max_retries: int = 3
+):
     """
     Pending durumdaki açık pozisyonları exchange ile doğrular.
     Başarılıysa status="open", exchange_verified=True;
@@ -211,26 +234,38 @@ async def verify_pending_trades_for_execution(db: AsyncSession, execution, max_r
     for open_trade in pending_trades:
         now = datetime.utcnow()
 
-        if open_trade.last_checked_at and (now - open_trade.last_checked_at) < timedelta(seconds=5):
+        if open_trade.last_checked_at and (
+            now - open_trade.last_checked_at
+        ) < timedelta(seconds=5):
             verifier_logger.debug(f"[skip] {open_trade.symbol} - checked too recently")
             continue
 
-        verifier_logger.debug(f"[verify-start] {open_trade.symbol} | side: {open_trade.side}, "
-                              f"size: {open_trade.position_size}")
-        verifier_logger.debug(f"🧩 execution.order_handler.get_position: "
-                              f"{getattr(execution.order_handler, 'get_position', 'NONE')}")
+        verifier_logger.debug(
+            f"[verify-start] {open_trade.symbol} | side: {open_trade.side}, "
+            f"size: {open_trade.position_size}"
+        )
+        verifier_logger.debug(
+            f"🧩 execution.order_handler.get_position: "
+            f"{getattr(execution.order_handler, 'get_position', 'NONE')}"
+        )
 
         try:
             position = await execution.order_handler.get_position(open_trade.symbol)
         except Exception as e:
-            verifier_logger.warning(f"[exception] get_position({open_trade.symbol}) exception: {e}")
+            verifier_logger.warning(
+                f"[exception] get_position({open_trade.symbol}) exception: {e}"
+            )
             continue
 
         verifier_logger.debug(f"[position] {open_trade.symbol}: {position!r}")
-        verifier_logger.debug(f"📦 Position was brought: {open_trade.symbol} → {position}")
+        verifier_logger.debug(
+            f"📦 Position was brought: {open_trade.symbol} → {position}"
+        )
 
         if not position:
-            verifier_logger.warning(f"[no-position] Could not get a position for {open_trade.symbol}")
+            verifier_logger.warning(
+                f"[no-position] Could not get a position for {open_trade.symbol}"
+            )
             continue
 
         # ✅ Yeni signature ile kullan
@@ -246,11 +281,15 @@ async def verify_pending_trades_for_execution(db: AsyncSession, execution, max_r
 
             if open_trade.verification_attempts >= max_retries:
                 open_trade.status = "failed"
-                verifier_logger.warning(f"[failed] ❌ {open_trade.symbol} max retries "
-                                        f"({max_retries}) exceeded, position is invalid.")
+                verifier_logger.warning(
+                    f"[failed] ❌ {open_trade.symbol} max retries "
+                    f"({max_retries}) exceeded, position is invalid."
+                )
             else:
-                verifier_logger.debug(f"[retry] {open_trade.symbol} retries "
-                                      f"{open_trade.verification_attempts}/{max_retries}")
+                verifier_logger.debug(
+                    f"[retry] {open_trade.symbol} retries "
+                    f"{open_trade.verification_attempts}/{max_retries}"
+                )
 
         open_trade.last_checked_at = now
         await db.commit()

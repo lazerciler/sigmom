@@ -26,6 +26,7 @@ OAUTH_SCOPE = "openid email profile"
 # STATE artık session'a yazılmıyor; gizli anahtarla imzalanıyor → reload/sekme sorunları biter
 serializer = URLSafeSerializer(settings.SESSION_SECRET, salt="oauth-state")
 
+
 @router.get("/login")
 async def login(request: Request):
     if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
@@ -45,6 +46,7 @@ async def login(request: Request):
         "prompt": "consent",
     }
     return RedirectResponse(f"{AUTH_URL}?{urlencode(params)}", status_code=302)
+
 
 @router.get("/callback")
 async def callback(
@@ -84,7 +86,9 @@ async def callback(
         tokens = token_res.json()
         access_token = tokens.get("access_token")
 
-        ui = await client.get(USERINFO_URL, headers={"Authorization": f"Bearer {access_token}"})
+        ui = await client.get(
+            USERINFO_URL, headers={"Authorization": f"Bearer {access_token}"}
+        )
         ui.raise_for_status()
         info = ui.json()
 
@@ -97,19 +101,25 @@ async def callback(
 
     # DB: async upsert (id,email,name,avatar_url)
     async with async_session() as db:
-        row = (await db.execute(text("SELECT id FROM users WHERE email=:e"), {"e": email})).first()
+        row = (
+            await db.execute(text("SELECT id FROM users WHERE email=:e"), {"e": email})
+        ).first()
         if row:
             uid = row[0]
             await db.execute(
-                text("""UPDATE users
+                text(
+                    """UPDATE users
                         SET google_sub=:s, name=:n, avatar_url=:p, updated_at=NOW()
-                        WHERE id=:id"""),
+                        WHERE id=:id"""
+                ),
                 {"s": sub, "n": name, "p": picture, "id": uid},
             )
         else:
             ins = await db.execute(
-                text("""INSERT INTO users (email, name, google_sub, avatar_url, created_at)
-                        VALUES (:e, :n, :s, :p, NOW())"""),
+                text(
+                    """INSERT INTO users (email, name, google_sub, avatar_url, created_at)
+                        VALUES (:e, :n, :s, :p, NOW())"""
+                ),
                 {"e": email, "n": name, "s": sub, "p": picture},
             )
             uid = ins.lastrowid
@@ -117,6 +127,7 @@ async def callback(
 
     request.session["uid"] = int(uid)  # sadece uid'yi session'a yazıyoruz
     return RedirectResponse("/", status_code=302)
+
 
 @router.get("/logout")
 async def logout(request: Request):
