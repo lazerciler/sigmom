@@ -24,7 +24,6 @@
       isAuthenticated: {{ 'true' if user else 'false' }},
       userName: {{ (user.name if user and (user.name is defined) else '') | tojson }},
       referralVerified: {{ 'true' if referral_verified else 'false' }},
-      capacityFull: {{ 'true' if capacity_full else 'false' }},
       feedUrl: {{ (feed_url | tojson) if feed_url else 'null' }},
     };
   </script>
@@ -68,7 +67,7 @@
           {% if referral_verified %}
             <span id="role-chip" class="chip bg-emerald-50 dark:bg-emerald-900/20 border-emerald-300/50 text-emerald-700 dark:text-emerald-300">Asil Üye</span>
           {% else %}
-            <span id="role-chip" class="chip bg-amber-50 dark:bg-amber-900/20 border-amber-300/50 text-amber-700 dark:text-amber-300">Read-Only</span>
+            <span id="role-chip" class="chip bg-amber-50 dark:bg-amber-900/20 border-amber-300/50 text-amber-700 dark:text-amber-300">Standart Üye</span>
           {% endif %}
           <div class="text-sm hidden sm:block">Merhaba, {{ user.name or user.email }}</div>
           <a href="/auth/google/logout"
@@ -120,15 +119,26 @@
           <h3 class="text-sm font-semibold mb-3">Durum</h3>
           <dl class="text-sm grid grid-cols-3 gap-y-2">
             <dt class="col-span-1 text-slate-500">Kullanıcı</dt><dd class="col-span-2 truncate">{{ user.name or user.email if user else '—' }}</dd>
-            <dt class="col-span-1 text-slate-500">Erişim</dt><dd id="access-level" class="col-span-2">{% if user and referral_verified %}Asil (tam){% elif user %}Read-Only{% else %}Misafir{% endif %}</dd>
-            <dt class="col-span-1 text-slate-500">Kapasite</dt><dd class="col-span-2">{{ 'Dolu' if capacity_full else 'Boş' }}</dd>
+            <dt class="col-span-1 text-slate-500">Erişim</dt><dd id="access-level" class="col-span-2">{% if user and referral_verified %}Asil (tam){% elif user %}Standart (kısıtlı){% else %}Misafir{% endif %}</dd>
+            <dt class="col-span-1 text-slate-500">Referans</dt>
+               <dd class="col-span-2">
+                 {% if referral_verified %}
+                   <span class="text-emerald-500">Onaylı</span>
+                 {% else %}
+                   <span class="text-amber-500">Yok</span>
+                 {% endif %}
+               </dd>
           </dl>
 
           <div class="my-4 border-t border-slate-200 dark:border-slate-700"></div>
 
           <h4 class="text-sm font-semibold mb-2">Güncel Duyuru</h4>
           <p class="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-            Panel şu an görüntüleme modunda. İşlem butonları, referans doğrulaması sonrası açılacaktır.
+            Panel şu an görüntüleme modunda. Bazı bölümlere erişim, referans doğrulaması sonrası açılır.
+          <!--  Şu anda asil üyelikler için tüm referanslar doludur. İleri bir tarihte yeni asil üyelikler için
+            kontenjan açılabilir. Sıraya girmek için panele giriş yaptıktan sonra gerekli bilgileri
+            burada görebilirsiniz.
+          -->
           </p>
 
           {% if user and not referral_verified %}
@@ -151,6 +161,50 @@
       <div class="kpi"><h6>SON İŞLEM</h6><div id="kpi-last" class="text-xs">—</div></div>
     </section>
 
+    <!-- user.referral_verified için kesin hüküm -->
+    <script>window.EQUITY_ALLOWED = {{ (referral_verified | default(false)) | tojson }};</script>
+
+    <!-- ===== EQUITY (Balance) KPI'ları ===== -->
+    <section id="equity-kpi" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div class="kpi"><h6>CURRENT BALANCE</h6><div id="stat-balance">—</div></div>
+      <div class="kpi"><h6>Net Profit</h6><div id="stat-net">—</div></div>
+      <div class="kpi"><h6>WIN RATE</h6><div id="stat-win">—</div></div>
+      <div class="kpi"><h6>SHARPE RATIO</h6><div id="stat-sharpe">—</div></div>
+      <div class="kpi"><h6>MAX DRAWDOWN</h6><div id="stat-mdd">—</div></div>
+      <div class="kpi"><h6>ANNUAL RETURN</h6><div id="stat-cagr">—</div></div>
+    </section>
+
+    <!-- ===== EQUITY (Balance) Grafiği + CAP ===== -->
+    <section class="mt-6">
+      <div class="card shadow-sm">
+        <div class="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700">
+          <h3 class="text-sm font-semibold">Balance</h3>
+<!--
+          <button id="cap-btn"
+            class="h-8 px-3 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 transition
+                   dark:border-slate-600 dark:text-slate-100 dark:hover:bg-slate-800 text-sm">
+            CAP
+          </button>
+-->
+        </div>
+        <div class="p-4">
+          <div class="w-full h-80">
+            <canvas id="equityChart"></canvas>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== Markers Özeti ===== -->
+    <!--
+    <section class="mt-6">
+      <div class="card shadow-sm p-4">
+        <div id="markers-summary" class="text-sm text-slate-500 dark:text-slate-400 mb-2"></div>
+        <ul id="markers-list" class="flex flex-wrap gap-2"></ul>
+      </div>
+    </section>
+    -->
+
     <!-- Tablolar yer tutucu -->
     <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
       <div class="card shadow-sm p-4"><h3 class="text-sm font-semibold mb-3">Açık Pozisyonlar</h3><div id="open-positions" class="text-sm text-slate-500">—</div></div>
@@ -160,8 +214,15 @@
 
   <!-- Lightweight Charts -->
   <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js" defer></script>
-  <!-- Panel JS -->
-  <script src="{{ url_for('static', path='js/panel.js') }}?v=20250811d" defer></script>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/moment"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment"></script>
+
+  <!-- Panel / Panel JS -->
+  <script src="{{ url_for('static', path='js/panel.js') }}?v=20250817c" defer></script>
+  <script src="{{ url_for('static', path='js/panel_equity.js') }}?v=20250817c" defer></script>
 
   <!-- Referans modal -->
   <dialog id="ref-modal" class="backdrop:bg-black/50 rounded-xl p-0 w-full max-w-md">
@@ -178,5 +239,12 @@
       </div>
     </form>
   </dialog>
+  <!-- Safelist for runtime-added classes (light/dark tones from panel.js) -->
+  <div class="hidden">
+    <span class="text-sky-700 bg-sky-50 border-sky-200 dark:text-sky-200 dark:bg-sky-500/15 dark:border-sky-300/40"></span>
+    <span class="text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-200 dark:bg-emerald-500/15 dark:border-emerald-300/40"></span>
+    <span class="text-rose-700 bg-rose-50 border-rose-200 dark:text-rose-200 dark:bg-rose-500/20 dark:border-rose-300/40"></span>
+  </div>
+
 </body>
 </html>

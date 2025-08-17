@@ -6,7 +6,6 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from app.dependencies.auth import get_current_user_opt
 from app.database import async_session
-from app.services.referrals import get_dynamic_capacity
 from sqlalchemy import text
 
 router = APIRouter()
@@ -24,10 +23,7 @@ async def panel(request: Request, user=Depends(get_current_user_opt)):
         email = None
 
     async with async_session() as db:
-        capacity_info = await get_dynamic_capacity(db, email)
-        capacity_full = capacity_info["free_total_for_user"] <= 0
-
-        # ⇩⇩ YENİ: Kullanıcı referral doğrulanmış mı?
+        # Kullanıcı referral doğrulanmış mı?
         referral_verified = False
         if user:
             # CLAIMED kodu var mı?
@@ -49,7 +45,6 @@ async def panel(request: Request, user=Depends(get_current_user_opt)):
         "user": user,
         "user_name": display_name,
         "referral_verified": referral_verified,
-        "capacity_full": capacity_full,
         "feed_url": None,
     }
 

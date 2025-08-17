@@ -46,6 +46,9 @@ venv/
 *.log
 *.sqlite
 
+# Patch files
+*.diff
+
 # Environment files
 .env
 >>>>>>> 00e04fd (README.md güncellendi)

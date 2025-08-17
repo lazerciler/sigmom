@@ -1,6 +1,12 @@
-// panel.js — grafik/marker + otomatik sembol seçimli panel
+// app/static/js/panel.js — grafik/marker + otomatik sembol seçimli panel
 (() => {
-  // ==== helpers ====
+  // ==== build flags & timings ====
+  const DEBUG = false;
+  const REFRESH_MS       = 5000;
+  const OPEN_TRADES_MS   = 10000;
+  const RECENT_TRADES_MS = 15000;
+
+// ==== helpers ====
   const $ = (sel) => document.querySelector(sel);
   const isDark = () => document.documentElement.classList.contains('dark');
   const setText = (sel, v) => { const el = $(sel); if (el) el.textContent = v; };
@@ -32,6 +38,7 @@
   /** @type {import('lightweight-charts').ISeriesApi<"Candlestick">} */ let candle;
 
   function makeChart() {
+    if (!chartEl) return; // chart DOM'u yoksa grafik kurulmaz
     chartEl.innerHTML = '';
     chart = LightweightCharts.createChart(chartEl, {
       autoSize: true,
@@ -92,7 +99,7 @@
     _jumpBtn.id = 'jump-latest';
     _jumpBtn.type = 'button';
 
-    // Sağ ortada
+    // Sağ altta
     _jumpBtn.className =
       'hidden absolute right-3 bottom-3 z-10 ' +
       'h-8 w-8 grid place-items-center rounded-md ' +
@@ -181,6 +188,7 @@
   // ==== market verisi ====
   async function loadKlines({ symbol = activeSymbol, tf = klTf, limit = klLimit } = {}) {
     try {
+      if (!candle) return []; // grafik kurulmadıysa sessizce çık
       const r = await fetch(`/api/market/klines?symbol=${symbol}&tf=${tf}&limit=${limit}`, { headers: { 'Accept': 'application/json' } });
       if (!r.ok) throw new Error('no api');
       const data = await r.json();
@@ -249,8 +257,10 @@
     try {
       const latestSym = await getLatestMarkerSymbol();
       if (latestSym && latestSym !== activeSymbol) {
-        setActiveSymbol(latestSym);
-        console.debug('[auto-switch] activeSymbol ->', latestSym);
+        // Sadece state ve etiketi güncelle; fetch işlemi caller döngüde yapılır
+        activeSymbol = latestSym;
+        updateSymbolLabel(activeSymbol);
+        if (DEBUG) console.debug('[auto-switch] activeSymbol ->', latestSym);
       }
     } finally { _autoSwitchLock = false; }
   }
@@ -258,6 +268,7 @@
   // ==== markers ====
   async function loadMarkers({ symbols = [], since = null } = {}) {
     try {
+      if (!candle) return []; // grafik yoksa marker çizme
       const params = new URLSearchParams();
       const list = symbols.length ? symbols : (activeSymbol ? [activeSymbol] : []);
       if (list.length) params.set('symbols', list.join(','));
@@ -311,18 +322,18 @@
       const from = (typeof seriesFirstTime === 'number') ? seriesFirstTime : -Infinity;
       const to   = (typeof seriesLastTime  === 'number') ? seriesLastTime  : +Infinity;
       const inRange = out.filter(m => m.time >= from && m.time <= to);
-      candle.setMarkers(inRange);
-      console.debug('[markers]', sym, 'inRange=', inRange.length, 'total=', out.length);
+      if (candle) candle.setMarkers(inRange);
+      if (DEBUG) console.debug('[markers]', sym, 'inRange=', inRange.length, 'total=', out.length);
       return inRange;
 
     } catch (e) {
       console.error('loadMarkers failed', e);
-      candle.setMarkers([]);
+      if (candle) candle.setMarkers([]);
       return [];
     }
   }
   // konsoldan debug edebilmek için
-  window.loadMarkers = loadMarkers;
+  if (DEBUG) window.loadMarkers = loadMarkers;
 
   // ==== açık pozisyonlar (tüm semboller) ====
   async function loadOpenTrades() {
@@ -410,29 +421,17 @@
   }
 
   // ==== sembol yönetimi ====
-  // BASE/QUOTE akıllı yazım (BTCUSDT, ETHFDUST, BTC/USDC, BTC-USD, …)
-  function formatPair(sym) {
-    const s = String(sym || '').toUpperCase().trim();
-    if (!s) return '';
-    if (s.includes('/') || s.includes('-') || s.includes('_')) return s.replace(/[-_]/g, '/');
-    const QUOTES = ['FDUST','FDUSD','USDT','USDC','BUSD','TUSD','DAI','EUR','USD','TRY','BTC','ETH'];
-    const q = QUOTES.find(q => s.endsWith(q));
-    if (q) return `${s.slice(0, s.length - q.length)}/${q}`;
-    return s.length > 4 ? `${s.slice(0, s.length - 4)}/${s.slice(-4)}` :
-           s.length > 3 ? `${s.slice(0, 3)}/${s.slice(3)}` : s;
-  }
+  // (legacy formatPair tahmini) kaldırıldı; sembol backend'den geldiği gibi gösteriliyor.
+  function formatPair(sym) { return String(sym ?? ''); }
+
   function updateSymbolLabel(sym) {
     const el = document.querySelector('#symbol-label');
-    if (el && sym) el.textContent = formatPair(sym);
+//    if (el && sym) el.textContent = formatPair(sym);
+    if (el) el.textContent = formatPair(sym);
   }
   async function loadSymbols() {
     try { const r = await fetch('/api/me/symbols', { credentials: 'include' }); if (!r.ok) return []; const j = await r.json(); return Array.isArray(j.symbols) ? j.symbols : []; }
     catch { return []; }
-  }
-  function setActiveSymbol(sym) {
-    activeSymbol = (sym || 'BTCUSDT').toUpperCase();
-    updateSymbolLabel(activeSymbol);
-    loadKlines({ symbol: activeSymbol }).then(() => loadMarkers({ symbols: [activeSymbol] }));
   }
 
   // ==== TF yönetimi ====
@@ -500,11 +499,95 @@
       await autoSwitchSymbolIfNeeded();
       await loadKlines({ symbol: activeSymbol });
       await loadMarkers({ symbols: [activeSymbol] });
-    }, 5000);
+    }, REFRESH_MS);
 
-    setInterval(() => loadOpenTrades(), 10000);
-    setInterval(() => loadRecentTrades(), 15000);
-    // setInterval(autoSwitchSymbolIfNeeded, 10000); // son sinyale göre otomatik sembol değişimi
-    // autoSwitch ayrı döngüde artık gereksiz (üstte entegre)
+    setInterval(() => loadOpenTrades(),  OPEN_TRADES_MS);
+    setInterval(() => loadRecentTrades(), RECENT_TRADES_MS);
+  })();
+
+  // ==== Referans Kodu Modalı (frontend) ====
+  (function wireReferralModal(){
+    const btnOpen  = document.getElementById('open-referral');
+    const modal    = document.getElementById('ref-modal');
+    const form     = document.getElementById('ref-form');
+    const input    = document.getElementById('ref-code');
+    const btnCancel= document.getElementById('ref-cancel');
+    const msg      = document.getElementById('ref-msg');
+    if (!btnOpen || !modal || !form || !input) return;
+
+    // ok=true: başarı, ok=false: hata, ok=null: nötr bilgi
+    function setMsg(t, ok = null){
+      if (!msg) return;
+      // erişilebilirlik
+      if (!msg.hasAttribute('role')) {
+        msg.setAttribute('role','status');
+        msg.setAttribute('aria-live','polite');
+      }
+      if (!t) {                 // boş mesaj: tamamen gizle
+        msg.textContent = '';
+        msg.className = 'hidden';
+        return;
+      }
+      msg.textContent = t;
+      const base = 'text-sm mt-2 px-2 py-1 rounded border font-medium tracking-wide ';
+      // light: koyu metin + açık arka plan, dark: açık metin + yarı saydam arka plan
+      let tone = 'text-sky-700 bg-sky-50 border-sky-200 dark:text-sky-200 dark:bg-sky-500/15 dark:border-sky-300/40';   // nötr
+      if (ok === true)  tone = 'text-emerald-700 bg-emerald-50 border-emerald-200 dark:text-emerald-200 dark:bg-emerald-500/15 dark:border-emerald-300/40';
+      if (ok === false) tone = 'text-rose-700 bg-rose-50 border-rose-200 dark:text-rose-200 dark:bg-rose-500/20 dark:border-rose-300/40';
+      msg.className = base + tone;
+    }
+
+    const extractErrText = (d, status) => {
+      try {
+        if (!d) return `Hata ${status}`;
+        if (typeof d === 'string') return d;
+        if (typeof d.detail === 'string') return d.detail;
+        if (Array.isArray(d.detail)) {
+          const items = d.detail.map(e => e.msg || e.message || e.type).filter(Boolean);
+          if (items.length) return items.join(' • ');
+        }
+        if (typeof d.message === 'string') return d.message;
+        const s = JSON.stringify(d); // kontrollü kısalt
+        return s.length > 160 ? s.slice(0,157) + '…' : s;
+      } catch { return `Hata ${status}`; }
+    };
+
+    btnOpen.addEventListener('click', () => {
+      setMsg('');                      // açılışta mesaj gizli
+      input.value = '';
+      if (modal.showModal) modal.showModal(); else modal.style.display = 'block';
+      setTimeout(()=>input.focus(), 30);
+    });
+    btnCancel?.addEventListener('click', () => {
+      setMsg('');                      // kapatırken de gizle
+      if (modal.close) modal.close(); else modal.style.display = 'none';
+    });
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const code = (input.value || '').trim().toUpperCase();
+      if (!code) { setMsg('Kod boş olamaz', false); return; }
+      // İstemci tarafı biçim kontrolü (backend de aynı regex ile doğruluyor)
+      if (!/^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(code)) {
+        setMsg('Kod formatı geçersiz. Örn: AB12-CDEF-3456', false);
+        return;
+      }
+     try {
+        setMsg('Doğrulanıyor…', null); // nötr ton
+        const r = await fetch('/referral/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ code })
+        });
+        if (!r.ok) {
+          let d=null; try { d = await r.json(); } catch {}
+          throw new Error(extractErrText(d, r.status));
+        }
+        setMsg('Başarılı. Yenileniyor…', true);
+        setTimeout(()=>location.reload(), 600);
+      } catch (err) {
+        setMsg(err?.message || 'Doğrulama başarısız', false);
+      }
+    });
   })();
 })();
