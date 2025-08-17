@@ -11,6 +11,7 @@
 ├── pyproject.toml
 ├── requirements-dev.txt
 ├── requirements.txt
+├── update.diff
 ├── .github/
 │   └── workflows/
 │       └── ci.yml
@@ -60,17 +61,15 @@
 │   │   └── webhook_router.py
 │   ├── services/
 │   │   ├── __init__.py
-│   │   ├── capacity.py
 │   │   ├── referral_maintenance.py
 │   │   └── referrals.py
 │   ├── static/
 │   │   ├── favicon.ico
-│   │   ├── css/
-│   │   │   └── panel.css
 │   │   ├── img/
 │   │   │   └── logo.svg
 │   │   └── js/
-│   │       └── panel.js
+│   │       ├── panel.js
+│   │       └── panel_equity.js
 │   ├── templates/
 │   │   ├── admin_referrals.html
 │   │   └── panel.html
