@@ -1,5 +1,52 @@
 # SIGMOM — Release Notes
 
+## v0.3.0 — 2025-08-17
+
+### Öne Çıkanlar
+- **Referans akışı (frontend)**
+  - Panelde referans kodu modali artık `/referral/verify` endpoint’ine **JSON `{code}`** ile POST ediyor.
+  - Hatalı format için **istemci tarafı regex** kontrolü eklendi (`AB12-CDEF-3456`).
+  - Hata/başarı mesajlarında **light/dark** uyumlu, yüksek kontrastlı uyarı şeritleri.
+  - “[object Object]” yerine okunabilir hata metni (liste/obje dönüşlerinde akıllı mesaj çıkarımı).
+
+- **Erişim rolleri (UI metinleri)**
+  - Terminoloji netleştirildi: **Misafir → Standart Üye → Asil Üye**.
+  - Header rozetindeki (role-chip) ve “Durum > Erişim” satırındaki metinler güncellendi.
+
+- **Equity (balance) erişim kapısı**
+  - Equity/Chart bölümünün görünürlüğü **yalnızca** `EQUITY_ALLOWED` bayrağına bağlandı (heuristic/fazladan istek yok).
+
+- **Kapasite temizliği**
+  - `capacity_full` ve ilişkili tüm UI/şablon artıkları **kaldırıldı**.
+  - `app/services/capacity.py` **silindi**.
+
+- **Diğer UI/akış düzeltmeleri**
+  - Sabit “USDT” etiketleri KPI başlıklarından kaldırıldı (değerler backend’den geliyor).
+  - Yanlış endpoint’lere istek atan eski kodlar düzeltildi (özellikle referans doğrulama).
+  - JS sürüm parametresi ile **cache busting** iyileştirildi.
+
+### Teknik Notlar / Değişiklikler
+- **Silinen dosya:** `app/services/capacity.py`
+- **Güncellenen dosyalar (özet):**
+  - `app/templates/panel.html` — rol/erişim metinleri, referans durumu; Tailwind safelist bloğu.
+  - `app/static/js/panel.js` — referans modali wiring, format doğrulama, mesaj kontrastı.
+  - `app/static/js/panel_equity.js` — `EQUITY_ALLOWED` temelli kapı.
+  - `app/routers/panel.py` — `capacity_full` context’ten çıkarıldı.
+
+### Kıran Değişiklikler
+- Şablonlarda/JS’te **`capacity_full` ya da `capacityFull`** artık yok. Kullanan özel kodlarınız varsa güncelleyin.
+- Referans doğrulama endpoint’i olarak **`POST /referral/verify` (JSON `{code}`)** kullanılmalı (çerezlerle `credentials: "include"`).
+
+### Yükseltme Adımları
+1. Pull → restart (uvicorn/servis).
+2. Tarayıcıda **hard refresh** (veya `panel.js?v=` numarasını artırın).
+3. “Referans Kodu Gir” modalında:
+   - Yanlış formatta anında uyarı,
+   - Geçerli kodda “Başarılı. Yenileniyor…” → sayfa yenilenir → “Asil Üye”.
+
+> Not: “Sıraya Gir (waitlist)” özelliği bu sürüme **dahil değil**; ayrı bir sürümde eklenecek.
+
+
 # v0.2.2 — LF Normalization & PyCharm Working Tree Sync
 **Yayın Tarihi:** 15 Ağustos 2025
 
