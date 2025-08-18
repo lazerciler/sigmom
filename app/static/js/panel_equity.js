@@ -267,6 +267,8 @@
   }
 
   document.addEventListener("DOMContentLoaded", () => {
+    // Quick Balance kartı panel.js'te aynı değeri kullanabilsin
+    try { window.START_CAPITAL = START_CAPITAL; } catch {}
     const allowed = checkEquityAllowed();
     if (!allowed) { lockEquityUI(); return; }
 

@@ -185,6 +185,13 @@
     return `${local} · ${utc} UTC`;
   };
 
+  // Kısa, yerel tarih (saniyesiz; "GG.AA SS:DD")
+  const fmtDateLocalShort = (rawTs) => {
+    if (!rawTs) return '—';
+    const ms = (typeof rawTs === 'number' && rawTs < 1e12) ? rawTs * 1000 : rawTs;
+    const d = new Date(ms);
+    return d.toLocaleString(LOCALE, { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
+  };
   // ==== market verisi ====
   async function loadKlines({ symbol = activeSymbol, tf = klTf, limit = klLimit } = {}) {
     try {
@@ -382,12 +389,18 @@
         const pnl = Number(t.realized_pnl);
         const pnlTxt = fmtPnl(pnl);
         const pnlCls = pnl >= 0 ? 'text-emerald-500' : 'text-rose-400';
+        // EP/XP: null/boş/0 gelirse "—" göster (0 kapanış gibi görünmesin)
+        const fmtMaybePrice = (v) => {
+          if (v == null || v === '') return '—';
+          const n = Number(v);
+          return (Number.isFinite(n) && n > 0) ? nf2.format(n) : '—';
+        };
         return `
           <div class="grid grid-cols-6 gap-2 py-1 border-b border-slate-200/40 dark:border-slate-700/40">
             <div class="col-span-2 font-medium">${t.symbol}</div>
             <div class="${t.side === 'long' ? 'text-emerald-500' : 'text-rose-400'}">${t.side.toUpperCase()}</div>
-            <div>EP: ${fmtNum(t.entry_price)}</div>
-            <div>XP: ${fmtNum(t.exit_price)}</div>
+            <div>EP: ${fmtMaybePrice(t.entry_price)}</div>
+            <div>XP: ${fmtMaybePrice(t.exit_price)}</div>
             <div class="${pnlCls}">${pnlTxt}</div>
             <div class="text-xs text-slate-500">${ts}</div>
           </div>`;
@@ -503,6 +516,133 @@
 
     setInterval(() => loadOpenTrades(),  OPEN_TRADES_MS);
     setInterval(() => loadRecentTrades(), RECENT_TRADES_MS);
+  })();
+
+  // ===== HIZLI BAKİYE ÖZETİ =====
+  (function wireQuickBalance(){
+    // Kart yalnız Asil'de HTML'a basılıyor; bu yüzden sadece DOM varlığına bakmak yeterli.
+    const elWallet = document.getElementById('qb-wallet');
+    const elNet    = document.getElementById('qb-net');
+    const elOpen = document.getElementById('qb-open');
+    const elLast = document.getElementById('qb-last');
+    const btnRef = document.getElementById('qb-refresh');
+    const a11y   = document.getElementById('qb-a11y');
+    const statusEl = document.getElementById('qb-status');
+    if (!elNet || !elOpen || !elLast) return;
+
+    // --- status helper: tek yerden yönet ---
+    let _qbHideTimer = null;
+    function showStatus(text, tone /* 'info'|'ok'|'err' */){
+      if (!statusEl) return;
+      // metin
+      statusEl.textContent = text || '';
+      // tüm olası ton ve opaklık sınıflarını sıfırla
+      statusEl.classList.remove('text-sky-500','text-emerald-500','text-rose-500','opacity-0','opacity-100');
+      // yeni tonu ver + görünür yap
+      const toneCls = tone === 'ok' ? 'text-emerald-500'
+                      : tone === 'err' ? 'text-rose-500'
+                      : 'text-sky-500';
+      statusEl.classList.add(toneCls,'opacity-100');
+      // önceki gizleme zamanlayıcısını iptal et
+      if (_qbHideTimer) { clearTimeout(_qbHideTimer); _qbHideTimer = null; }
+      // kısa süre sonra şeffaflaştır (butonu itmeden çünkü width sabit)
+      const delay = tone === 'ok' ? 1200 : (tone === 'err' ? 1800 : 0);
+      if (delay > 0) {
+        _qbHideTimer = setTimeout(() => {
+          statusEl.classList.remove('opacity-100');
+          statusEl.classList.add('opacity-0');
+          _qbHideTimer = null;
+        }, delay);
+      }
+    }
+
+    const nf2 = new Intl.NumberFormat(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fmt2 = (v) => nf2.format(v || 0);
+    const safeNum = (v) => {
+      if (v == null || v === '' || Number.isNaN(+v)) return 0;
+      return +v;
+    };
+    // Öncelikli alan: realized_pnl; diğer isimler olursa temkinli fallback
+    const pickPnl = (t) => (
+      t?.realized_pnl ??
+      t?.realized_pnl_usd ??
+      t?.pnl_usdt ??
+      t?.pnl ??
+      0
+    );
+
+    async function loadQuickBalance(){
+      try {
+        // durum: yenileniyor
+        showStatus('Yenileniyor…','info');
+        // Başlangıç değerleri: boş kalmasın
+        elNet.textContent = '0'; elOpen.textContent = '0'; elLast.textContent = '—';
+        // 1) Kapanan işlemler -> toplam net PnL ve son işlem
+        let net = 0, lastText = '—';
+        try {
+          const r = await fetch('/api/me/recent-trades?limit=100', { credentials: 'include', headers:{'Accept':'application/json'} });
+          if (r.ok) {
+            const arr = await r.json();
+            if (Array.isArray(arr) && arr.length) {
+              for (const t of arr) net += safeNum(pickPnl(t));
+              const last = arr[0];
+              const side = (last?.side || '').toString().toUpperCase();
+              const sym  = last?.symbol || '';
+              const lpnl = safeNum(pickPnl(last));
+              const sign = lpnl >= 0 ? '+' : '';
+              // Tarih: kısa/yerel göster
+              const ts   = fmtDateLocalShort(last?.timestamp);
+              lastText = `${sym} ${side} · ${sign}${fmt2(lpnl)} · ${ts}`;
+            }
+          }
+        } catch {}
+
+        // 2) Açık pozisyon sayısı
+        let openCnt = 0;
+        try {
+          const r2 = await fetch('/api/me/open-trades', { credentials: 'include', headers:{'Accept':'application/json'} });
+          if (r2.ok) {
+            const arr2 = await r2.json();
+            if (Array.isArray(arr2)) openCnt = arr2.length;
+          }
+        } catch {}
+
+        elNet.textContent  = (net === 0 ? '0' : (net > 0 ? '+' : '−') + fmt2(Math.abs(net)));
+        elOpen.textContent = String(openCnt);
+        elLast.textContent = lastText;
+
+        // Net PnL Renk: + yeşil / - kırmızı
+        elNet.classList.remove('text-emerald-500','text-rose-400');
+        if (net > 0) elNet.classList.add('text-emerald-500');
+        else if (net < 0) elNet.classList.add('text-rose-400');
+
+        // Cüzdan = START_CAPITAL + net
+        if (elWallet) {
+          const START_CAP = (typeof window.START_CAPITAL === 'number') ? window.START_CAPITAL : 1000;
+          const wallet = START_CAP + net;
+          elWallet.textContent = fmt2(wallet);
+          // Cüzdan rengi: başlangıç üstü/altı
+          elWallet.classList.remove('text-emerald-500','text-rose-400');
+          if (wallet > START_CAP) elWallet.classList.add('text-emerald-500');
+          else if (wallet < START_CAP) elWallet.classList.add('text-rose-400');
+        }
+        // a11y: güncellendi bilgisi
+        if (a11y) a11y.textContent = 'Hızlı bakiye özeti güncellendi.';
+        // durum: yenilendi (kısa süre göster)
+        showStatus('Yenilendi','ok');
+      } catch {
+        // sessiz
+        showStatus('Hata','err');
+      }
+    }
+
+    btnRef?.addEventListener('click', (e) => {
+      e.preventDefault();
+      if (a11y) a11y.textContent = 'Yenileniyor…';
+      loadQuickBalance();
+    });
+    // ilk yükleme
+    loadQuickBalance();
   })();
 
   // ==== Referans Kodu Modalı (frontend) ====

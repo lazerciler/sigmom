@@ -16,9 +16,11 @@ from sqlalchemy import (
     func,
     Enum as SaEnum,
 )
-from sqlalchemy.orm import declarative_base, relationship
+from sqlalchemy.orm import relationship
+from app.database import Base
 
-Base = declarative_base()
+# from sqlalchemy.orm import declarative_base, relationship
+# Base = declarative_base()
 
 
 class RawSignal(Base):
