@@ -4,7 +4,7 @@
 // Locale-aware, fixed START_CAPITAL, no CAP button, no quote inference.
 (() => {
   // ---- CONFIG ----
-  const START_CAPITAL = 1000;    // fixed starting capital (edit in code)
+  const START_CAPITAL = 8372.30;    // fixed starting capital (edit in code)
   const MIN_CAGR_DAYS = 21;      // don't show annual return for shorter spans
   const MAX_ANNUAL_PCT = 5000;   // cap display to +/- 5000% to avoid silly numbers
 
@@ -25,12 +25,12 @@
     const card = c?.closest('.card') || c?.parentElement || null;
     if (card) card.style.display = 'none';
 
-    // İsteğe bağlı kısa bilgi notu
-    const holder = (kpi && kpi.parentElement) || document.body;
-    const note = document.createElement('div');
-    note.className = 'mt-4 text-sm text-slate-500 dark:text-slate-400';
-    note.textContent = 'Bazı bölümlere erişim referans onayı gerektirir.';
-    holder.appendChild(note);
+//    // İsteğe bağlı kısa bilgi notu
+//    const holder = (kpi && kpi.parentElement) || document.body;
+//    const note = document.createElement('div');
+//    note.className = 'mt-4 text-sm text-slate-500 dark:text-slate-400';
+//    note.textContent = 'Bazı bölümlere erişim referans onayı gerektirir.';
+//    holder.appendChild(note);
   }
 
   // ---- Locale ----
@@ -193,7 +193,7 @@
       data: {
         datasets: [
           {
-            label: "Balance",
+            label: "Bakiye",
             data: points,
             parsing: true,
             borderWidth: 2,

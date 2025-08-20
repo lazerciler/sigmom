@@ -19,6 +19,15 @@ from app.dependencies.auth import get_current_user, require_admin
 templates = Jinja2Templates(directory="app/templates")
 router = APIRouter(prefix="/admin/referrals", tags=["admin-referrals"])
 
+CSP = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "connect-src 'self'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+)
+
 ALPH = string.ascii_uppercase + string.digits
 
 
@@ -119,6 +128,11 @@ async def panel(request: Request, current_user=Depends(get_current_user)):
             "codes": codes,
             "free_codes": free_codes,
             "current_user": current_user,
+        },
+        headers={
+            "Content-Security-Policy": CSP,
+            "X-Content-Type-Options": "nosniff",
+            "Referrer-Policy": "same-origin",
         },
     )
 

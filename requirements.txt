@@ -29,6 +29,8 @@ alembic>=1.10                # SQLAlchemy migration için (aktif kullanımda de�
 # asyncmy>=0.3.2             # MySQL için hızlı client ama Windows uyumsuz — şimdilik devre dışı
 
 # pytest-asyncio>=1.1.0
+pytest-asyncio==0.23.5
+
 # pytest-cov>=4.1.0
 
 bcrypt==4.1.3

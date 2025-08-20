@@ -2,11 +2,12 @@
 # app/handlers/signal_handler.py
 # Python 3.9
 import logging
-from fastapi import HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
+from decimal import Decimal
 from typing import Optional, Dict
 
-# from decimal import Decimal
+from fastapi import HTTPException
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.schemas import WebhookSignal
 from app.utils.exchange_loader import load_execution_module
 from crud.raw_signal import insert_raw_signal
@@ -20,8 +21,8 @@ logger = logging.getLogger(__name__)
 
 
 async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
-    logger.info(f"Signal received: {signal_data}")
-    logger.info(f"Order type: {signal_data.order_type}")
+    logger.info("Signal received: %s", signal_data)
+    logger.info("Order type: %s", signal_data.order_type)
 
     if signal_data.order_type.lower() != "market":
         logger.warning(
@@ -46,21 +47,27 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
     # OPEN
     if signal_data.mode == "open":
         try:
+            # PRE-FLIGHT: Emirden önce kaldıraç ayarı
             if signal_data.leverage is not None:
-                await execution.order_handler.set_leverage(
+                lev_res = await execution.order_handler.set_leverage(
                     signal_data.symbol, signal_data.leverage
                 )
-                logger.info(
-                    f"Leverage adjustment successfully: {signal_data.symbol} x{signal_data.leverage}"
-                )
-            else:
-                logger.debug(f"Leverage skipped (None): {signal_data.symbol}")
+                if not lev_res or not lev_res.get("success", False):
+                    logger.warning("Leverage preflight failed: %s", lev_res)
+                else:
+                    logger.info(
+                        "Preflight leverage set → %s x%s",
+                        signal_data.symbol,
+                        signal_data.leverage,
+                    )
 
             # Emir gönder
-            order_result = await execution.order_handler.place_order(signal_data)
-
+            coid = f"sai_open_{raw_signal.id}"
+            order_result = await execution.order_handler.place_order(
+                signal_data, client_order_id=coid
+            )
             if not order_result.get("success"):
-                logger.error(f"OPEN order failed: {order_result}")
+                logger.error("OPEN order failed: %s", order_result)
                 return {
                     "success": False,
                     "message": f"Opening order failed: {order_result.get('message', 'Unknown error')}",
@@ -84,13 +91,13 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
             }
 
         except Exception as e:
-            logger.exception(f"OPEN operation failed: {e}")
+            logger.exception("OPEN operation failed: %s", e)
             return {"success": False, "message": f"OPEN error: {e}"}
 
     # CLOSE
     elif signal_data.mode == "close":
         logger.info(
-            f"CLOSE signal received → {signal_data.symbol} | {signal_data.exchange}"
+            "CLOSE signal received → %s | %s", signal_data.symbol, signal_data.exchange
         )
 
         # 1) Kapatılacak open trade’i güvenli seç
@@ -102,8 +109,7 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
         )
         if open_trade is None:
             logger.error(
-                "[CLOSE] No matching open position found (if there is no public id, "
-                "the last open record is checked)."
+                "[CLOSE] No matching open position found (if there is no public id, the last open record is checked)."
             )
             return {
                 "success": False,
@@ -111,9 +117,12 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
             }
 
         # 2) Close emrini gönder (LEVERAGE YOK!)
-        order_result = await execution.order_handler.place_order(signal_data)
+        coid = f"sai_close_{raw_signal.id}"
+        order_result = await execution.order_handler.place_order(
+            signal_data, client_order_id=coid
+        )
         if not order_result.get("success"):
-            logger.error(f"[CLOSE] Order failed: {order_result}")
+            logger.error("[CLOSE] Order failed: %s", order_result)
             return {
                 "success": False,
                 "message": f"Close order failed: {order_result.get('message', 'Unknown error')}",
@@ -124,10 +133,8 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
         try:
             position = await execution.order_handler.get_position(signal_data.symbol)
         except Exception as e:
-            logger.warning(f"[CLOSE] get_position exception: {e}")
+            logger.warning("[CLOSE] get_position exception: %s", e)
             position = None
-
-        from decimal import Decimal
 
         def _amt(pos: Optional[Dict]) -> Decimal:
             return Decimal(str((pos or {}).get("positionAmt", "0"))).copy_abs()
@@ -135,6 +142,7 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
         if position and _amt(position) == 0:
             # Anında kapanış: kalıcı trade’e taşı, open’dan sil
             await close_open_trade_and_record(db, open_trade, position)
+            await db.commit()
             return {
                 "success": True,
                 "message": "Position closed and recorded.",

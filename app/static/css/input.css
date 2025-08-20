@@ -1,0 +1,13 @@
+@import "tailwindcss";
+
+/* .dark sınıfı altında çalışan dark varyantını etkinleştir */
+@custom-variant dark (&:where(.dark &));
+
+@source "../../templates/**/*.html";
+@source "../js/**/*.js";
+
+/* ↓ mevcut base kuralların */
+@layer base {
+  button, [role="button"], a { @apply cursor-pointer; }
+  :disabled { @apply cursor-not-allowed; }
+}

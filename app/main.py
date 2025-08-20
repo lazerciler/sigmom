@@ -24,6 +24,7 @@ from app.routers import panel_data
 from app.routers import referral
 from app.routers import auth_google
 from app.routers import admin_referrals
+from app.routers import admin_test
 from app.routers import auth
 from app.routers import market
 from app.services.referral_maintenance import cleanup_expired_reserved
@@ -59,6 +60,7 @@ app.include_router(panel_data.router)
 app.include_router(auth_google.router, prefix="/auth/google", tags=["auth"])
 app.include_router(referral.router, prefix="/referral", tags=["referral"])
 app.include_router(admin_referrals.router)
+app.include_router(admin_test.router)
 app.include_router(auth.router)
 app.include_router(market.router)
 

@@ -1,32 +1,15 @@
 <!doctype html>
-<html lang="tr">
+<html lang="tr" class="dark">
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>Admin • Referans Yönetimi</title>
-
-  <!-- Dark mode: sayfa boyanmadan önce doğru tema -->
-  <script>
-    (function () {
-      var t = localStorage.getItem('theme');
-      var prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-      if (t === 'dark' || (!t && prefersDark)) {
-        document.documentElement.classList.add('dark');
-      }
-    })();
-  </script>
-  <!-- Tailwind CDN: dark'ı class ile kullan -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'class'
-    }
-    // Sayfa yüklenmeden önce tema uygula
-    if (localStorage.getItem('theme') === 'dark') {
-      document.documentElement.classList.add('dark');
-  }
-  </script>
-  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <!-- Dark mode ve Tailwind config -->
+  <script src="{{ url_for('static', path='js/admin_referrals_head.js') }}?v=3a"></script>
+  <!-- Tailwind  -->
+  <link rel="stylesheet" href="{{ url_for('static', path='css/tw.css') }}?v=3a">
+  <!-- HTMX -->
+  <script src="{{ url_for('static', path='js/htmx.min.js') }}"></script>
 </head>
 
 <body class="bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-100">
@@ -41,9 +24,7 @@
         </p>
       </div>
       <button id="themeToggle"
-              class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-700">
-        🌙 / ☀️
-      </button>
+                class="h-8 w-8 rounded-lg border border-slate-300 dark:border-slate-600">🌓</button>
     </header>
 
     <!-- 1) Kullanıcıya kod bağla -->
@@ -98,7 +79,7 @@
     <section class="bg-white dark:bg-slate-800 rounded-xl shadow p-5">
       <h2 class="font-medium text-lg mb-4">Yeni Referans Kodları üret</h2>
 
-      <form method="post" action="/admin/referrals/generate" target="_blank"
+      <form id="gen-form" method="post" action="/admin/referrals/generate" target="_blank"
             class="grid gap-4 md:grid-cols-4" autocomplete="off">
         <label class="block">
           <span class="text-sm text-slate-600 dark:text-slate-300">Adet</span>
@@ -121,7 +102,7 @@
         <div class="md:col-span-4 flex flex-wrap gap-3 items-center">
           <!-- CSV -->
           <input type="hidden" name="mode" value="download">
-          <button type="submit"
+          <button type="submit" id="csv-download"
                   class="h-10 px-4 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">
             Kodları Üret ve CSV İndir
           </button>
@@ -130,8 +111,7 @@
           <div class="flex items-center gap-2">
             <input type="password" name="zip_password" placeholder="ZIP parolası (opsiyonel)"
                    class="h-10 px-3 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700">
-            <button type="submit" formaction="/admin/referrals/generate" formmethod="post"
-                    onclick="this.previousElementSibling.form.mode.value='zip'"
+            <button type="submit" id="zip-download"
                     class="h-10 px-4 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">
               Kodları Üret ve ZIP İndir
             </button>
@@ -146,7 +126,10 @@
     <section class="bg-white dark:bg-slate-800 rounded-xl shadow p-5">
       <div class="flex items-center justify-between mb-3">
         <h2 class="font-medium text-lg">Son Kullanıcılar</h2>
-        <a href="/admin/referrals/export" class="h-10 px-4 rounded-lg border border-slate-300 dark:border-slate-600 text-sm">
+        <a href="/admin/referrals/export"
+           class="inline-flex items-center justify-center h-10 px-4
+          rounded-lg border border-slate-300 dark:border-slate-600
+          text-sm hover:bg-slate-100 dark:hover:bg-slate-700">
           Mevcut Eşleşmelerin CSV’si
         </a>
       </div>
@@ -215,7 +198,9 @@
       <div class="flex items-center justify-between mb-3">
         <h2 class="font-medium text-lg">Kodlar</h2>
         <form hx-post="/admin/referrals/expire_cleanup" hx-target="body" hx-swap="innerHTML" class="inline">
-          <button class="h-10 px-3 rounded-lg border border-slate-300 dark:border-slate-600 text-sm">
+          <button
+                  class="h-10 px-3 rounded-lg border border-slate-300
+                  dark:border-slate-600 text-sm hover:bg-slate-100 dark:hover:bg-slate-700">
             Süresi Geçen Rezervleri Temizle
           </button>
         </form>
@@ -270,59 +255,7 @@
       </div>
     </section>
 
-
   </main>
-
-  <!-- Tema toggle -->
-  <script>
-    var btn = document.getElementById('themeToggle');
-    if (btn) {
-      btn.addEventListener('click', function () {
-        var el = document.documentElement;
-        var isDark = el.classList.toggle('dark');
-        localStorage.setItem('theme', isDark ? 'dark' : 'light');
-      });
-    }
-  </script>
-
-<script>
-  // Hata mesajını form altında göster
-  window.handleAssignError = function (e) {
-    const msgEl = document.getElementById('assign-msg');
-    let text = '';
-    try {
-      const json = JSON.parse(e.detail.xhr.responseText || '{}');
-      text = json.detail || '';
-    } catch (_) {}
-    if (!text) text = e.detail.xhr.responseText || 'İşlem başarısız.';
-    msgEl.textContent = text;
-    msgEl.className = 'md:col-span-4 text-sm mt-1 text-rose-600';
-  };
-
-  // İki alan dolmadan butonu açma; düz kodu normalize et
-  (function () {
-    const form = document.getElementById('assign-form');
-    if (!form) return;
-    const idField   = form.querySelector('[name="referral_id"]');
-    const codeField = form.querySelector('input[name="plain_code"]');
-    const submitBtn = document.getElementById('assign-submit');
-    const msgEl     = document.getElementById('assign-msg');
-
-    function validate() {
-      const ok = !!(idField.value && codeField.value && codeField.value.trim().length >= 8);
-      submitBtn.disabled = !ok;
-      if (msgEl) msgEl.textContent = ''; // eski hata mesajını temizle
-    }
-
-    idField.addEventListener('change', validate);
-    codeField.addEventListener('input', () => {
-      codeField.value = codeField.value.toUpperCase().replace(/\s+/g, '');
-      validate();
-    });
-
-    // İlk yüklemede de kontrol
-    validate();
-  })();
-</script>
+<script src="{{ url_for('static', path='js/admin_referrals.js') }}" defer></script>
 </body>
 </html>

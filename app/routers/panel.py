@@ -11,6 +11,15 @@ from sqlalchemy import text
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
+CSP = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "connect-src 'self'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+)
+
 
 @router.get("/", response_class=HTMLResponse)
 async def panel(request: Request, user=Depends(get_current_user_opt)):

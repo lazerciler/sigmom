@@ -1,10 +1,11 @@
-// app/static/js/panel.js — grafik/marker + otomatik sembol seçimli panel
+// app/static/js/panel.js
 (() => {
   // ==== build flags & timings ====
   const DEBUG = false;
   const REFRESH_MS       = 5000;
   const OPEN_TRADES_MS   = 10000;
   const RECENT_TRADES_MS = 15000;
+  const RECENT_TRADES_LIMIT = 50; // (50 yerine 20 göster)
 
 // ==== helpers ====
   const $ = (sel) => document.querySelector(sel);
@@ -31,6 +32,112 @@
     localStorage.setItem('theme', wantDark ? 'dark' : 'light');
     applyChartTheme(wantDark);
   });
+
+
+//// === MA overlay katmanları ===
+//const MA = {}; // { key: LineSeries }
+//
+//function ensureLine(key, color) {
+//  if (!MA[key]) {
+//    MA[key] = chart.addLineSeries({
+//      color,
+//      lineWidth: 2,
+//      priceScaleId: 'right',            // aynı pencerede overlay
+//      lastValueVisible: true,
+//      crosshairMarkerVisible: true,
+//    });
+//  }
+//  return MA[key];
+//}
+
+// === MA overlay katmanları ===
+const MA = {}; // { key: LineSeries }
+
+// MA renkleri (dark & light için iki palet)
+const MA_COLORS = (dark) => ({
+  SMA20:  dark ? '#38bdf8' : '#0284c7', // sky
+  SMA50:  dark ? '#a78bfa' : '#7c3aed', // violet
+  EMA100: dark ? '#f59e0b' : '#b45309', // amber (kullanırsan)
+});
+
+function ensureLine(key) {
+  const color = (MA_COLORS(isDark())[key]) || '#60a5fa';
+  if (!MA[key]) {
+    MA[key] = chart.addLineSeries({
+      color,
+      lineWidth: 2.5,
+      priceScaleId: 'right',
+      lastValueVisible: false,
+      crosshairMarkerVisible: true,
+    });
+  } else {
+    MA[key].applyOptions({ color });
+  }
+  return MA[key];
+}
+
+function recolorMAs(dark) {
+  const pal = MA_COLORS(dark);
+  Object.keys(MA).forEach(k => MA[k]?.applyOptions({ color: pal[k] || '#60a5fa' }));
+}
+
+// Basit hareketli ortalama
+function sma(values, period) {
+  const out = Array(values.length).fill(null);
+  let sum = 0;
+  for (let i = 0; i < values.length; i++) {
+    sum += values[i];
+    if (i >= period) sum -= values[i - period];
+    if (i >= period - 1) out[i] = sum / period;
+  }
+  return out;
+}
+
+// Üssel hareketli ortalama
+function ema(values, period) {
+  const out = Array(values.length).fill(null);
+  const k = 2 / (period + 1);
+  let prev = null;
+  for (let i = 0; i < values.length; i++) {
+    const v = values[i];
+    if (i === period - 1) {
+      // ilk EMA'yı SMA ile başlat
+      let s = 0; for (let j = 0; j < period; j++) s += values[j];
+      prev = s / period;
+      out[i] = prev;
+    } else if (i >= period) {
+      prev = v * k + prev * (1 - k);
+      out[i] = prev;
+    }
+  }
+  return out;
+}
+
+// Candlestick datasından MA serileri üret
+function buildMAData(klSeries, arrValues) {
+  const times = klSeries.map(b => b.time);
+  return arrValues.map((v, i) => (v == null ? null : { time: times[i], value: v })).filter(Boolean);
+}
+
+// Dışarıdan çağır: örn. updateMAOverlays(series, { sma: [20], ema: [50] })
+function updateMAOverlays(klSeries, config = { sma: [20], ema: [] }) {
+  const closes = klSeries.map(b => b.close);
+
+  (config.sma || []).forEach(p => {
+    const data = buildMAData(klSeries, sma(closes, p));
+    ensureLine(`SMA${p}`).setData(data);
+  });
+
+  (config.ema || []).forEach(p => {
+    const data = buildMAData(klSeries, ema(closes, p));
+    ensureLine(`EMA${p}`).setData(data);
+  });
+}
+
+// Varsayılan katmanlar (istediğin gibi değiştir)
+const MA_CONFIG = { sma: [20, 50], ema: [] }; // SMA20 mavi-yeşil ton, SMA50 mor ton
+// Gizlemek istenirse:
+// MA['SMA20']?.setData([]);  MA['EMA50']?.setData([]);
 
   // ==== grafik ====
   const chartEl = document.getElementById('chart');
@@ -68,6 +175,7 @@
     });
     applyChartTheme(isDark());
     new ResizeObserver(() => chart?.timeScale().fitContent()).observe(chartEl);
+    // chart kurulumu tamamlanınca
     ensureJumpBtn();
     chart.timeScale().subscribeVisibleTimeRangeChange(updateJumpBtnVisibility);
   }
@@ -89,6 +197,7 @@
       wickUpColor: dark ? '#10b981' : '#16a34a',
       wickDownColor: dark ? '#ef4444' : '#dc2626',
     });
+    recolorMAs(dark);
   }
 
   // ==== "En son çubuğa kaydır" butonu ====
@@ -151,17 +260,32 @@
   let seriesFirstTime = null;
   let seriesLastTime  = null; // grafikte en son barın zamanı (ghost sonrası kesin mevcut)
   let activeSymbol = null;
-  // bar süresi (sn) tablosu
+  let klTimes = [];            // seri bar zamanları (s)
+  let klGridTimes = [];        // ilk→son bar arası TF adımlı grid
+
+
   const TF_SEC = { '1m':60, '5m':300, '15m':900, '1h':3600, '4h':14400, '1d':86400 };
-  // Açık işlemin çizim politikası:
-  // 'hybrid'   : canlı OPEN son mumda; kapanınca tarihsel OPEN + CLOSE görünür.
-  // 'live-only': yalnız açıkken son mumda; kapanınca OPEN çizilmez (sadece CLOSE).
-  // 'historical': her zaman tarihsel barında.
-  const OPEN_MARKER_MODE = 'hybrid';
+
+  // Verilen ts (s/ms) → grafiğin bar grid'ine snap (<= ts olan en yakın bar başlangıcı)
+  function snapToSeries(ts){
+    const tfSec = TF_SEC[klTf] || 60;
+    const v = Number(ts);
+    const sec = v < 1e12 ? v : Math.floor(v / 1000);
+    const times = (klGridTimes && klGridTimes.length) ? klGridTimes : klTimes;
+    if (times && times.length){
+      let lo=0, hi=times.length;           // upperBound
+      while (lo < hi){ const mid=(lo+hi)>>1; (times[mid] <= sec) ? (lo=mid+1) : (hi=mid); }
+      const idx = Math.max(0, lo-1);
+      return times[idx];
+    }
+    return Math.floor(sec / tfSec) * tfSec;
+  }
+
+  // i18n — tarayıcı dilini erkenden al (makeChart içinde kullanılıyor)
+  const LOCALE = (navigator.languages && navigator.languages[0]) || navigator.language || 'en-US';
 
   // ==== i18n helpers ====
   // Kullanıcının tarayıcı diline göre sayı formatı
-  const LOCALE = (navigator.languages && navigator.languages[0]) || navigator.language || 'en-US';
   const nf0 = new Intl.NumberFormat(LOCALE);
   const nf2 = new Intl.NumberFormat(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   // NOT: Yukarıda let olarak tanımlananlara burada atama yapıyoruz
@@ -181,8 +305,8 @@
     if (!iso) return '—';
     const d = parseIsoAsUtc(iso);
     const local = d.toLocaleString(LOCALE);
-    const utc   = new Intl.DateTimeFormat(LOCALE, { timeZone: 'UTC', dateStyle: 'short', timeStyle: 'medium' }).format(d);
-    return `${local} · ${utc} UTC`;
+    // const utc   = new Intl.DateTimeFormat(LOCALE, { timeZone: 'UTC', dateStyle: 'short', timeStyle: 'medium' }).format(d);
+    return `${local}`; // · ${utc} UTC`;
   };
 
   // Kısa, yerel tarih (saniyesiz; "GG.AA SS:DD")
@@ -209,10 +333,28 @@
           return { time: ts, open: +row.o, high: +row.h, low: +row.l, close: +row.c };
         }
       });
+
       if (series.length) {
+        klTimes = series.map(s => s.time);   // seriden gelen bar zamanları
+
+        // Grafik verisini bas
         candle.setData(series);
+        // MA overlay: kapanmış barlar üzerinden hesapla (son bar hariç → daha stabil)
+        if (series.length > 1) {
+          updateMAOverlays(series.slice(0, -1), MA_CONFIG);
+        } else {
+          try { Object.values(MA).forEach(s => s.setData([])); } catch {}
+        }
+
+        // Zaman/grid hesapları
         seriesFirstTime = series[0].time;
+
         const barSec = TF_SEC[tf] || 900;
+        seriesLastTime = series[series.length - 1].time;
+        // (varsa ghost/son bar güncellemesi burada yapılıyor)
+        // seriesLastTime kesinleştikten sonra grid’i üret:
+        klGridTimes = [];
+        for (let t = seriesFirstTime; t <= seriesLastTime; t += barSec) klGridTimes.push(t);
         const last = series[series.length - 1];
         let lastTime = last?.time || null;
         const nowBar = Math.floor((Date.now() / 1000) / barSec) * barSec;
@@ -234,6 +376,15 @@
     }
   }
 
+
+  function fmtDateUTC(ts) {
+    const d = new Date(Number(ts));
+    const p = n => String(n).padStart(2, '0');
+    return `${p(d.getUTCDate())}.${p(d.getUTCMonth()+1)}.${d.getUTCFullYear()} `
+         + `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())} UTC`;
+  }
+
+
   // ==== son sinyal hangi sembolde? ====
   async function getLatestMarkerSymbol() {
     try {
@@ -245,9 +396,12 @@
       if (!Array.isArray(items) || !items.length) return null;
       // YALNIZCA HÂLÂ AÇIK pozisyonların OPEN marker'ını dikkate al (id'de ':' YOK).
       // Canlı OPEN yoksa, sembolü DEĞİŞTİRME (null dön).
-    const liveOpens = items.filter(m =>
-      String(m.kind).toLowerCase() === 'open' && m.is_live === true
-    );
+    const liveOpens = items.filter(m => {
+      const kind   = String(m.kind || '').toLowerCase();
+      const status = String(m.status || '').toLowerCase();
+      const isLive = (m.is_live === true || m.is_live === 1 || m.is_live === '1' || status === 'open');
+      return kind === 'open' && isLive;
+    });
     if (!liveOpens.length) return null;
     const chosen = liveOpens.reduce(
       (a,b) => ((+(a.time_bar ?? a.time) || 0) > (+(b.time_bar ?? b.time) || 0) ? a : b)
@@ -272,75 +426,71 @@
     } finally { _autoSwitchLock = false; }
   }
 
-  // ==== markers ====
-  async function loadMarkers({ symbols = [], since = null } = {}) {
-    try {
-      if (!candle) return []; // grafik yoksa marker çizme
-      const params = new URLSearchParams();
-      const list = symbols.length ? symbols : (activeSymbol ? [activeSymbol] : []);
-      if (list.length) params.set('symbols', list.join(','));
-      if (since) params.set('since', String(since));
-      params.set('tf', klTf);
 
-      const res = await fetch(`/api/me/markers?${params.toString()}`, { credentials: 'include' });
-      if (!res.ok) throw new Error('markers api fail');
-      /** @type {{symbol:string,time:number,position?:'aboveBar'|'belowBar',text:string,price?:number,id:string,kind:'open'|'close',side?:'long'|'short'}[]} */
-      const items = await res.json();
+// ==== markers ====
+async function loadMarkers({ symbols = [], since = null } = {}) {
+  try {
+    if (!candle) return []; // grafik yoksa marker çizme
 
-      // aktif sembol filtresi (grafik tek sembol)
-      const sym = (activeSymbol || '').toUpperCase().trim();
-      const data = sym
-        ? items.filter(m => String(m.symbol || '').toUpperCase().trim() === sym)
-        : items;
+    const params = new URLSearchParams();
+    const list = symbols.length ? symbols : (activeSymbol ? [activeSymbol] : []);
+    if (list.length) params.set('symbols', list.join(','));
+    if (since) params.set('since', String(since));
+    params.set('tf', klTf);
 
-      // Not: Eski sinyaller çok gerideyse klines'i genişletme.
-      // Yalnızca görünür aralık içindeki marker'ları çizeceğiz.
+    const res = await fetch(`/api/me/markers?${params.toString()}`, { credentials: 'include' });
+    if (!res.ok) throw new Error('markers api fail');
+    /** @type {{symbol:string,time:number,position?:'aboveBar'|'belowBar',text?:string,price?:number,id?:string,kind:'open'|'close',side?:'long'|'short',status?:string,is_live?:any}[]} */
+    const items = await res.json();
 
-      const out = [];
-      for (const m of data) {
-        const isClose = m.kind === 'close';
-        const textU = String(m.text || '').toUpperCase();
-        const sideU = String(m.side || (textU.includes('SHORT') ? 'SHORT' : (textU.includes('LONG') ? 'LONG' : ''))).toUpperCase();
-        const isLong  = sideU === 'LONG';
-        const pos = isClose
-          ? (isLong ? 'aboveBar' : 'belowBar')
-          : (m.position || (isLong ? 'belowBar' : 'aboveBar'));
-        const txt   = isClose ? 'Close' : (isLong ? 'Long' : 'Short');
-        const color = isLong ? '#10b981' : '#ef4444';
-        const shape = isClose ? 'circle' : (isLong ? 'arrowUp' : 'arrowDown');
-        // Zaman: backend TF'e göre normalize veriyor
-        const whenBar = Number(m.time_bar ?? m.time);
-        let   tOut    = whenBar;
-        if (m.kind === 'open') {
-          const isLive = m.is_live === true;
-          if (OPEN_MARKER_MODE === 'live-only') {
-            if (!isLive) continue; // kapanmış OPEN'ı hiç çizme
-            tOut = (typeof seriesLastTime === 'number') ? seriesLastTime : whenBar;
-          } else if (OPEN_MARKER_MODE === 'hybrid') {
-            if (isLive) tOut = (typeof seriesLastTime === 'number') ? seriesLastTime : whenBar;
-          } // 'historical' ise tOut=whenBar
-        }
-        const size = txt.length > 2 ? 1 : 2;
-        const base = { time: tOut, position: pos, text: txt, color, shape, size };
-        out.push(base);
+    // aktif sembol filtresi (grafik tek sembol)
+    const sym = (activeSymbol || '').toUpperCase().trim();
+    const data = sym ? items.filter(m => String(m.symbol || '').toUpperCase().trim() === sym) : items;
+
+    // CANLI open’ı bul (çeşitli API varyantlarına dayanıklı)
+    let liveOpen = null;
+    for (const m of data) {
+      const kind   = String(m.kind || '').toLowerCase();
+      if (kind !== 'open') continue;
+      const status = String(m.status || '').toLowerCase();
+      const isLive = (m.is_live === true || m.is_live === 1 || m.is_live === '1' || status === 'open');
+      if (!isLive) continue;
+
+      // yön: side öncelikli, yoksa metinden çıkar
+      let sideU = String(m.side || '').toUpperCase();
+      if (!sideU) {
+        const tu = String(m.text || '').toUpperCase();
+        if (tu.includes('LONG')) sideU = 'LONG';
+        else if (tu.includes('SHORT')) sideU = 'SHORT';
       }
-
-      // (Option A) Sadece görünür kline aralığındaki marker'ları çiz
-      const from = (typeof seriesFirstTime === 'number') ? seriesFirstTime : -Infinity;
-      const to   = (typeof seriesLastTime  === 'number') ? seriesLastTime  : +Infinity;
-      const inRange = out.filter(m => m.time >= from && m.time <= to);
-      if (candle) candle.setMarkers(inRange);
-      if (DEBUG) console.debug('[markers]', sym, 'inRange=', inRange.length, 'total=', out.length);
-      return inRange;
-
-    } catch (e) {
-      console.error('loadMarkers failed', e);
-      if (candle) candle.setMarkers([]);
-      return [];
+      if (!sideU) continue; // yön yoksa çizmeyelim (yanlış ok göstermeyelim)
+      liveOpen = { isLong: sideU === 'LONG' };
+      // (birden fazla canlı open varsa, sonuncusu üstüne yazar; sorun değil)
     }
+
+    // Sadece tek bir işaret: CANLI yön oku (son bar üstünde)
+    let markers = [];
+    if (liveOpen && typeof seriesLastTime === 'number') {
+      markers = [{
+        time: seriesLastTime,
+        position: liveOpen.isLong ? 'belowBar' : 'aboveBar', // Long: bar altı ↑, Short: bar üstü ↓
+        text: liveOpen.isLong ? 'Long' : 'Short',
+        color: liveOpen.isLong ? '#10b981' : '#ef4444',
+        shape: liveOpen.isLong ? 'arrowUp' : 'arrowDown',
+        size: 2
+      }];
+    }
+
+    candle.setMarkers(markers);
+    return markers;
+  } catch (e) {
+    if (DEBUG) console.error('loadMarkers failed', e);
+    try { candle && candle.setMarkers([]); } catch {}
+    return [];
   }
-  // konsoldan debug edebilmek için
-  if (DEBUG) window.loadMarkers = loadMarkers;
+}
+if (DEBUG) window.loadMarkers = loadMarkers;
+
 
   // ==== açık pozisyonlar (tüm semboller) ====
   async function loadOpenTrades() {
@@ -375,48 +525,55 @@
     }
   }
 
-  // ==== kapanan işlemler (tüm semboller) ====
-  async function loadRecentTrades() {
-    try {
-      const res = await fetch(`/api/me/recent-trades?limit=50`, { credentials: 'include' });
-      if (!res.ok) throw new Error('api');
-      const items = await res.json();
-      const el = document.querySelector('#recent-trades');
-      if (!el) return items;
-      if (!Array.isArray(items) || items.length === 0) { el.textContent = '—'; return []; }
-      const rows = items.map(t => {
-        const ts = fmtDateLocalPlusUTC(t.timestamp);
-        const pnl = Number(t.realized_pnl);
-        const pnlTxt = fmtPnl(pnl);
-        const pnlCls = pnl >= 0 ? 'text-emerald-500' : 'text-rose-400';
-        // EP/XP: null/boş/0 gelirse "—" göster (0 kapanış gibi görünmesin)
-        const fmtMaybePrice = (v) => {
-          if (v == null || v === '') return '—';
-          const n = Number(v);
-          return (Number.isFinite(n) && n > 0) ? nf2.format(n) : '—';
-        };
-        return `
-          <div class="grid grid-cols-6 gap-2 py-1 border-b border-slate-200/40 dark:border-slate-700/40">
-            <div class="col-span-2 font-medium">${t.symbol}</div>
-            <div class="${t.side === 'long' ? 'text-emerald-500' : 'text-rose-400'}">${t.side.toUpperCase()}</div>
-            <div>EP: ${fmtMaybePrice(t.entry_price)}</div>
-            <div>XP: ${fmtMaybePrice(t.exit_price)}</div>
-            <div class="${pnlCls}">${pnlTxt}</div>
-            <div class="text-xs text-slate-500">${ts}</div>
-          </div>`;
-      }).join('');
-      el.innerHTML = `
-        <div class="text-xs text-slate-500 mb-1 grid grid-cols-6 gap-2">
-          <div class="col-span-2">Sembol</div><div>Yön</div><div>EP</div><div>XP</div><div>PnL</div><div>Tarih</div>
-        </div>
-        <div>${rows}</div>`;
+async function loadRecentTrades() {
+  try {
+    const res = await fetch(`/api/me/recent-trades?limit=${RECENT_TRADES_LIMIT}`, { credentials: 'include' });
+    if (!res.ok) throw new Error('api');
+    const items = await res.json();
+    const el = document.querySelector('#recent-trades');
+    if (!el) return items;
+
+    if (!items || !items.length) {
+      el.innerHTML = '—';
       return items;
-    } catch {
-      const el = document.querySelector('#recent-trades');
-      if (el) el.textContent = '—';
-      return [];
     }
+
+  const header = `
+    <div class="text-xs text-slate-500 dark:text-slate-400 mb-1 grid gap-2"
+         style="grid-template-columns:repeat(5,minmax(0,1fr))">
+        <div>Sembol</div>
+        <div>Yön</div>
+        <div>Giriş Fiyatı</div>
+        <div>Çıkış Fiyatı</div>
+        <div>PnL</div>
+      </div>`;
+
+    const fmtMaybePrice = (v) => (v == null || v === '' ? '—' : nf2.format(Number(v)));
+    const rows = items.map(t => {
+      const side = String(t.side || '').toUpperCase();
+      const sideCls = side === 'LONG' ? 'text-emerald-500' : 'text-rose-400';
+      const pnl = Number(t.pnl ?? t.realized_pnl ?? 0);
+      const pnlCls = pnl >= 0 ? 'text-emerald-500' : 'text-rose-400';
+      const tsUTC = fmtDateUTC(t.closed_at ?? t.time ?? Date.now());
+      return `
+        <div class="grid gap-2 py-1 border-b border-slate-200/40 dark:border-slate-700/40"
+         style="grid-template-columns:repeat(5,minmax(0,1fr))">
+          <div class="font-medium" title="${tsUTC}">${t.symbol}</div>
+          <div class="${sideCls}">${side}</div>
+          <div>${fmtMaybePrice(t.entry_price)}</div>
+          <div>${fmtMaybePrice(t.exit_price)}</div>
+          <div class="${pnlCls}">${nf2.format(pnl)}</div>
+        </div>`;
+    }).join('');
+
+    el.innerHTML = header + `<div>${rows}</div>`;
+    return items;
+  } catch {
+    const el = document.querySelector('#recent-trades');
+    if (el) el.textContent = '—';
+    return [];
   }
+}
 
   // ==== genel özet ====
   async function loadOverview() {
@@ -509,7 +666,7 @@
     // setInterval(() => { loadKlines({ symbol: activeSymbol }); loadMarkers({ symbols: [activeSymbol] }); }, 30000);
     // periyodik: HER turda önce auto-switch, sonra klines+markers
     setInterval(async () => {
-      await autoSwitchSymbolIfNeeded();
+      // otomatik sembol geçişi kapalı
       await loadKlines({ symbol: activeSymbol });
       await loadMarkers({ symbols: [activeSymbol] });
     }, REFRESH_MS);

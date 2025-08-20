@@ -14,5 +14,6 @@ router = APIRouter(prefix="/webhook", tags=["Webhook"])
 async def receive_webhook(
     signal: WebhookSignal, db: AsyncSession = Depends(get_db)
 ) -> dict:
-    public_id = await handle_signal(signal, db)
-    return {"public_id": public_id}
+    # public_id = await handle_signal(signal, db)
+    # return {"public_id": public_id}
+    return await handle_signal(signal, db)

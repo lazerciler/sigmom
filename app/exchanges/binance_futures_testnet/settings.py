@@ -8,6 +8,8 @@ EXCHANGE_NAME = "binance_futures_testnet"
 API_KEY = getattr(settings, f"{EXCHANGE_NAME.upper()}_API_KEY")
 API_SECRET = getattr(settings, f"{EXCHANGE_NAME.upper()}_API_SECRET")
 BASE_URL = "https://testnet.binancefuture.com"
+POSITION_MODE = "one_way"  # or "hedge"
+
 KLINES_PATH = "/fapi/v1/klines"
 KLINES_PARAMS = {"symbol": "symbol", "interval": "interval", "limit": "limit"}
 KLINES_LIMIT_MAX = 1500
@@ -36,4 +38,5 @@ ENDPOINTS = {
     "BALANCE": "/fapi/v2/balance",
     "TIME": "/fapi/v1/time",
     "EXCHANGE_INFO": "/fapi/v1/exchangeInfo",
+    "POSITION_SIDE_DUAL": "/fapi/v1/positionSide/dual",  # GET/POST
 }

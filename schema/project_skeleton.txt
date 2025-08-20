@@ -11,10 +11,19 @@
 ├── pyproject.toml
 ├── requirements-dev.txt
 ├── requirements.txt
-├── update.diff
+├── tailwind.config.js
+├── tailwindcss.exe
 ├── .github/
 │   └── workflows/
 │       └── ci.yml
+├── .pytest_cache/
+│   ├── .gitignore
+│   ├── CACHEDIR.TAG
+│   ├── README.md
+│   └── v/
+│       └── cache/
+│           ├── lastfailed
+│           └── nodeids
 ├── .ruff_cache/
 │   ├── .gitignore
 │   ├── CACHEDIR.TAG
@@ -52,6 +61,7 @@
 │   ├── routers/
 │   │   ├── __init__.py
 │   │   ├── admin_referrals.py
+│   │   ├── admin_test.py
 │   │   ├── auth.py
 │   │   ├── auth_google.py
 │   │   ├── market.py
@@ -65,13 +75,24 @@
 │   │   └── referrals.py
 │   ├── static/
 │   │   ├── favicon.ico
+│   │   ├── css/
+│   │   │   ├── input.css
+│   │   │   ├── panel_extras.css
+│   │   │   ├── tw.css
+│   │   │   └── tw.src.css
 │   │   ├── img/
 │   │   │   └── logo.svg
 │   │   └── js/
+│   │       ├── admin_referrals.js
+│   │       ├── admin_referrals_head.js
+│   │       ├── admin_test.js
+│   │       ├── htmx.min.js
 │   │       ├── panel.js
-│   │       └── panel_equity.js
+│   │       ├── panel_equity.js
+│   │       └── panel_head.js
 │   ├── templates/
 │   │   ├── admin_referrals.html
+│   │   ├── admin_test.html
 │   │   └── panel.html
 │   └── utils/
 │       ├── __init__.py
@@ -110,9 +131,10 @@
 │   ├── acceptable_json_examples.txt
 │   ├── project_skeleton.txt
 │   └── sigmom_pro_v1_20250813_dump.sql
-└── scripts/
-    ├── README.txt
-    ├── generate_timestamp.py
-    ├── idtest.py
-    ├── seed_demo_users.py
-    └── zip_logger_backup.py
+├── scripts/
+│   ├── README.txt
+│   ├── generate_timestamp.py
+│   ├── idtest.py
+│   ├── seed_demo_users.py
+│   └── zip_logger_backup.py
+└── tests/

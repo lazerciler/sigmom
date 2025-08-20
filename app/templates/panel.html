@@ -1,51 +1,15 @@
 <!doctype html>
-<html lang="tr">
+<html lang="tr"  class="dark">
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>SIGMOM • Panel</title>
-
-  <!-- Sayfa boyanmadan önce tema -->
-  <script>
-    (() => {
-      const t = localStorage.getItem('theme');
-      const prefersDark = matchMedia('(prefers-color-scheme: dark)').matches;
-      if (t === 'dark' || (!t && prefersDark)) document.documentElement.classList.add('dark');
-    })();
-  </script>
-
-  <!-- Tailwind (CDN) -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>tailwind.config = { darkMode: 'class' }</script>
-
-  <!-- Sunucu durumu -->
-  <script>
-    window.__SIGMOM__ = {
-      isAuthenticated: {{ 'true' if user else 'false' }},
-      userName: {{ (user.name if user and (user.name is defined) else '') | tojson }},
-      referralVerified: {{ 'true' if referral_verified else 'false' }},
-      feedUrl: {{ (feed_url | tojson) if feed_url else 'null' }},
-    };
-  </script>
-
-  <!-- Ufak stil dokunuşları -->
-  <style>
-    .chip{display:inline-flex;align-items:center;height:28px;padding:0 10px;border-radius:10px;font-size:12px;border:1px solid rgb(203 213 225/0.6)}
-    .card{border:1px solid rgb(226 232 240);border-radius:16px;background:#fff}
-    /* Dark: kartları bir ton AÇ (slate-800) ve sınırı slate-700 yap */
-    .dark .card{border-color:#334155;background:#1f2937}
-    .kpi{border:1px solid rgb(226 232 240);border-radius:14px;padding:12px 12px 10px;background:#fff}
-    .dark .kpi{background:#1f2937;border-color:#334155}
-    /* aktif TF butonu vurgusu */
-    #tf-controls [data-tf][aria-current="true"]{
-      background:#2563eb;color:#fff;border-color:rgba(37,99,235,.5);
-    }
-    .dark #tf-controls [data-tf][aria-current="true"]{
-      background:#3b82f6;border-color:rgba(59,130,246,.5);
-    }
-    .kpi h6{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#64748b}
-    .kpi div{font-weight:600;margin-top:6px}
-  </style>
+  <!-- Dark mode ve Tailwind config -->
+  <script src="{{ url_for('static', path='js/panel_head.js') }}?v=4c"></script>
+  <!-- Tailwind -->
+  <link rel="stylesheet" href="{{ url_for('static', path='css/tw.css') }}?v=4c">
+  <!-- Small style touches -->
+  <link rel="stylesheet" href="{{ url_for('static', path='css/panel_extras.css') }}?v=1c">
 </head>
 
 <body class="bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-100">
@@ -117,15 +81,20 @@
       <aside class="lg:col-span-4">
         <div class="card shadow-sm p-4">
           <h3 class="text-sm font-semibold mb-3">Durum</h3>
+
           <dl class="text-sm grid grid-cols-3 gap-y-2">
-            <dt class="col-span-1 text-slate-500">Kullanıcı</dt><dd class="col-span-2 truncate">{{ user.name or user.email if user else '—' }}</dd>
-            <dt class="col-span-1 text-slate-500">Erişim</dt><dd id="access-level" class="col-span-2">{% if user and referral_verified %}Asil (tam){% elif user %}Standart (kısıtlı){% else %}Misafir{% endif %}</dd>
+            <dt class="col-span-1 text-slate-500">Hesap sahibi</dt>
+            <dd class="col-span-2 truncate text-right">{{ user.name or user.email if user else '⚠' }}</dd>
+            <dt class="col-span-1 text-slate-500">Erişim</dt>
+            <dd id="access-level" class="col-span-2 text-right">{% if user and referral_verified %}
+              Asil (tam){% elif user %}
+              Standart (kısıtlı){% else %}
+              Misafir{% endif %}</dd>
             <dt class="col-span-1 text-slate-500">Referans</dt>
-               <dd class="col-span-2">
-                 {% if referral_verified %}
-                   <span class="text-emerald-500">Onaylı</span>
+               <dd class="col-span-2 text-right">{% if referral_verified %}
+                   <span class="text-emerald-500">🏆</span>
                  {% else %}
-                   <span class="text-amber-500">Yok</span>
+                   <span class="text-amber-500">⌛</span>
                  {% endif %}
                </dd>
           </dl>
@@ -149,7 +118,7 @@
             <h4 class="text-sm font-semibold mb-2">Hızlı Bakiye Özeti</h4>
             <ul id="qb-list" class="text-sm grid grid-cols-1 gap-y-1">
               <li class="flex items-center justify-between">
-                <span>Cüzdan</span><span id="qb-wallet">—</span>
+                <span>Bakiye</span><span id="qb-wallet">—</span>
               </li>
               <li class="flex items-center justify-between">
                 <span>Net PnL</span><span id="qb-net">—</span>
@@ -183,7 +152,18 @@
       </aside>
     </section>
 
-    <!-- KPI -->
+    <!-- user.referral_verified için kesin hüküm -->
+    <script>window.EQUITY_ALLOWED = {{ (referral_verified | default(false)) | tojson }};</script>
+
+    <!-- Tablolar yer tutucu -->
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div class="card shadow-sm p-4"><h3 class="text-sm font-semibold mb-3">Açık pozisyonlar (Borsa tarafı)</h3>
+        <div id="open-positions" class="text-sm text-slate-500">—</div></div>
+      <div class="card shadow-sm p-4"><h3 class="text-sm font-semibold mb-3">Kapanan işlemler (Borsa tarafı)</h3>
+        <div id="recent-trades" class="text-sm text-slate-500 h-12 overflow-y-auto overscroll-contain pr-1">—</div></div>
+    </section>
+
+          <!-- KPI -->
     <section class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
       <div class="kpi"><h6>PnL (7g)</h6><div id="kpi-pnl">—</div></div>
       <div class="kpi"><h6>WINRATE (30g)</h6><div id="kpi-win">—</div></div>
@@ -193,11 +173,9 @@
       <div class="kpi"><h6>SON İŞLEM</h6><div id="kpi-last" class="text-xs">—</div></div>
     </section>
 
-    <!-- user.referral_verified için kesin hüküm -->
-    <script>window.EQUITY_ALLOWED = {{ (referral_verified | default(false)) | tojson }};</script>
 
     <!-- ===== EQUITY (Balance) KPI'ları ===== -->
-    <section id="equity-kpi" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+    <section id="equity-kpi" class="hidden grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
       <div class="kpi"><h6>CURRENT BALANCE</h6><div id="stat-balance">—</div></div>
       <div class="kpi"><h6>Net Profit</h6><div id="stat-net">—</div></div>
       <div class="kpi"><h6>WIN RATE</h6><div id="stat-win">—</div></div>
@@ -206,11 +184,12 @@
       <div class="kpi"><h6>ANNUAL RETURN</h6><div id="stat-cagr">—</div></div>
     </section>
 
+
     <!-- ===== EQUITY (Balance) Grafiği + CAP ===== -->
     <section class="mt-6">
       <div class="card shadow-sm">
         <div class="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700">
-          <h3 class="text-sm font-semibold">Balance</h3>
+          <h3 class="text-sm font-semibold">Bakiye</h3>
 <!--
           <button id="cap-btn"
             class="h-8 px-3 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 transition
@@ -226,24 +205,7 @@
         </div>
       </div>
     </section>
-
-    <!-- ===== Markers Özeti ===== -->
-    <!--
-    <section class="mt-6">
-      <div class="card shadow-sm p-4">
-        <div id="markers-summary" class="text-sm text-slate-500 dark:text-slate-400 mb-2"></div>
-        <ul id="markers-list" class="flex flex-wrap gap-2"></ul>
-      </div>
-    </section>
-    -->
-
-    <!-- Tablolar yer tutucu -->
-    <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <div class="card shadow-sm p-4"><h3 class="text-sm font-semibold mb-3">Açık Pozisyonlar</h3><div id="open-positions" class="text-sm text-slate-500">—</div></div>
-      <div class="card shadow-sm p-4"><h3 class="text-sm font-semibold mb-3">Kapanan İşlemler</h3><div id="recent-trades" class="text-sm text-slate-500">—</div></div>
-    </section>
   </main>
-
   <!-- Lightweight Charts -->
   <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js" defer></script>
 
@@ -253,8 +215,8 @@
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment"></script>
 
   <!-- Panel / Panel JS -->
-  <script src="{{ url_for('static', path='js/panel.js') }}?v=20250817h" defer></script>
-  <script src="{{ url_for('static', path='js/panel_equity.js') }}?v=20250817h" defer></script>
+  <script src="{{ url_for('static', path='js/panel.js') }}?v=20250820sa" defer></script>
+  <script src="{{ url_for('static', path='js/panel_equity.js') }}?v=20250819c" defer></script>
 
   <!-- Referans modal -->
   <dialog id="ref-modal" class="backdrop:bg-black/50 rounded-xl p-0 w-full max-w-md">

@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <title>SIGMOM — Test Panel</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { --bg:#0b1220; --card:#121b2e; --txt:#e3e8f4; --muted:#93a1b3; --accent:#4da3ff; --ok:#2ecc71; --warn:#f39c12; --err:#e74c3c; }
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial; color: var(--txt); background: radial-gradient(1200px 800px at 10% -10%, #1a2642, #0b1220); }
+    .wrap { max-width: 980px; margin: 32px auto; padding: 0 16px; }
+    h1 { font-size: 22px; margin: 0 0 16px; }
+    .card { background: var(--card); border: 1px solid #233153; border-radius: 14px; padding: 16px; margin-bottom: 16px; box-shadow: 0 6px 24px rgba(0,0,0,0.25); }
+    label { display: block; color: var(--muted); margin-bottom: 6px; }
+    input[type=text], input[type=number], input[type=datetime-local], select, textarea {
+      width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid #2a3a61; background: #0e1730; color: var(--txt);
+    }
+    .grid { display: grid; gap: 12px; }
+    .g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .radio { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 999px; background: #0d1630; border: 1px solid #233153; cursor: pointer; user-select: none; }
+    .actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    button { appearance: none; padding: 10px 14px; border-radius: 10px; border: 1px solid #2b3a5d; background: #162447; color: var(--txt); cursor: pointer; }
+    button.primary { background: var(--accent); border-color: #2a6ac7; color: #08111f; font-weight: 600; }
+    button.ghost { background: transparent; border-color: #2b3a5d; }
+    .hint { color: var(--muted); font-size: 12px; }
+    .pill { display:inline-block; padding:4px 8px; border-radius:999px; background:#0e1a34; border:1px solid #2a3a61; color:var(--muted); font-size:12px; }
+    pre { background: #0a1126; border: 1px solid #233153; border-radius: 10px; padding: 12px; overflow: auto; }
+    .ok { color: var(--ok) }
+    .warn { color: var(--warn) }
+    .err { color: var(--err) }
+    .small { font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>SIGMOM — Webhook Test Panel <span id="status" class="pill">idle</span>
+    <span id="modeBadge" class="pill">mode…</span></h1>
+
+    <div class="card">
+      <div class="grid g3">
+        <div>
+          <label>Exchange</label>
+          <select id="exchange">
+            <option value="binance_futures_testnet" selected>binance_futures_testnet</option>
+            <!-- gelecekte mainnet / diğer borsalar buraya eklenir -->
+          </select>
+          <div class="hint small">Şablonu test etmek için testnet kullanıyoruz.</div>
+        </div>
+
+        <div>
+          <label>Mode</label>
+          <div class="row">
+            <label class="radio"><input type="radio" name="mode" value="open" checked/> open</label>
+            <label class="radio"><input type="radio" name="mode" value="close"/> close</label>
+          </div>
+        </div>
+
+        <div>
+          <label>Side</label>
+          <div class="row">
+            <label class="radio"><input type="radio" name="side" value="long" checked/> long</label>
+            <label class="radio"><input type="radio" name="side" value="short"/> short</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid g2" style="margin-top:12px">
+        <div>
+          <label>Symbol</label>
+          <input id="symbol" type="text" value="BTCUSDT" />
+          <div class="hint small">Otomatik <code>upper()</code> uygulanır.</div>
+        </div>
+        <div>
+          <label>Position Size</label>
+          <input id="position_size" type="number" value="0.03" step="0.0001" min="0" />
+        </div>
+      </div>
+
+      <div class="grid g3" style="margin-top:12px">
+        <div>
+          <label>Leverage (opsiyonel)</label>
+          <input id="leverage" type="number" placeholder="örn. 5" min="1" max="125" />
+          <div class="hint small">Boş bırakırsan kaldıraç ayarı atlanır.</div>
+        </div>
+        <div>
+          <label>Order Type</label>
+          <input id="order_type" type="text" value="market" readonly/>
+        </div>
+        <div>
+          <label>Fund Manager ID</label>
+          <input id="fund_manager_id" type="text" value="fxmgr_tj2025_rQz91" />
+        </div>
+      </div>
+
+      <div class="grid g3" style="margin-top:12px">
+        <div>
+          <label>Entry Price (ops.)</label>
+          <input id="entry_price" type="number" step="0.01" />
+        </div>
+        <div>
+          <label>Exit Price (ops.)</label>
+          <input id="exit_price" type="number" step="0.01" />
+        </div>
+        <div>
+          <label>Timestamp (UTC ISO)</label>
+          <input id="timestamp" type="text" />
+          <div class="hint small">Şimdiki zaman için “Now”’a bas.</div>
+        </div>
+      </div>
+
+      <div class="actions" style="margin-top:14px">
+        <button class="ghost" id="btnNow">Now</button>
+        <button class="primary" id="btnSend">Send Signal</button>
+        <button id="btnReset" class="ghost">Reset</button>
+        <span class="hint">Hedge/one-way parametresi **server config**’ten yönetilir; panel yalnızca sinyali gönderir.</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <div><strong>Gönderilen Payload</strong></div>
+        <div class="small hint">Order idempotency server’da uygulanır (newClientOrderId).</div>
+      </div>
+      <pre id="payloadOut">{}</pre>
+      <div style="height:6px"></div>
+      <div><strong>Yanıt</strong> <span id="respBadge" class="pill">–</span></div>
+      <pre id="respOut">{}</pre>
+    </div>
+  </div>
+
+<script src="{{ url_for('static', path='js/admin_test.js') }}?v=20250819a" defer></script>
+</body>
+</html>
