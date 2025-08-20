@@ -1,5 +1,37 @@
 # SIGMOM — Release Notes
 
+## v1.0.0 — 2025-08-20 🎉 (TODAY'S DATE)
+
+### 🚀 BÜYÜK TEMİZLİK VE STABİLİZASYON
+
+**ÖNEMLİ:** Önceki tüm "stable" olmayan tag'ler silindi.
+
+### ✅ Temizlenen Eski Tag'ler:
+- v0.1.0-stable (stable değildi) ❌
+- v0.2.0 ❌
+- v0.2.1 ❌
+- v0.2.2 ❌
+- v0.3.0 ❌
+
+### 🎯 Bu Release'de Neler Var?
+- **Black Code Formatting** tüm kod tabanına uygulandı
+- **Public klasörü** ve dosya yapısı iyileştirmeleri
+- **`.gitignore`** merge conflict'leri temizlendi
+- **Profesyonel tag yönetimi** başlatıldı
+
+### 📊 Teknik Detaylar:
+- 3+ dosya Black ile formatlandı
+- Kod okunabilirliği önemli ölçüde arttı
+- GitHub repo artık lokalle tam senkronize
+
+### ⚠️ Kıran Değişiklikler:
+- Eski tag'ler tamamen temizlendi
+- Kod formatting standartları değişti
+
+---
+
+## [ESKİ RELEASE NOTLARI (ARŞİV) - AŞAĞIDA DEVAM EDİYOR...]
+
 ## v0.3.0 — 2025-08-17
 
 ### Öne Çıkanlar
