@@ -1,5 +1,47 @@
 # SIGMOM — Release Notes
 
+## v1.0.1 — 2025-08-23
+
+### 🎯 Öne Çıkanlar
+- **Görünürlük Kuralları (Panel)**
+  - **Misafir:** “Açık/Kapanan işlemler” ve KPI/Equity blokları ilk render’dan itibaren **gizli**.
+  - **Girişli:** “Açık/Kapanan işlemler” **görünür**.
+  - **Referans Doğrulanmış:** KPI’lar + Equity **görünür**. (Server-side koşullandırma + koşullu script yükleme ile FOUC bitti.)
+- **Tarih Gösterimi (Borsa tarafı)**
+  - “Kapanan işlemler” ve “Açık pozisyonlar”da PnL yerine **Tarih (UTC)**.
+  - **ISO** ve **epoch (10/13 hane)** girişleri otomatik algılanır.
+- **Scrollbar / UI Polisajı**
+  - “Açık/Kapanan işlemler” listelerinde **ince kaydırma** (dikey/yatay).
+  - `panel_extras.css` yorum hatası düzeltildi; yatay scrollbar **height** eklendi.
+- **Equity / KPI**
+  - Equity KPI ve grafiği yalnız **referanslı** kullanıcıda.
+  - Başlangıç bakiyesi backend’den çekiliyor; gereksiz periyodik “dans” yok (**olay-tetikli** yenileme).
+- **Boş durum senaryosu**
+  - İlk kurulumda sinyal yoksa: “Henüz sinyal yok” etiketi + **ön tanımlı sembol** ile grafik boş kalmaz.
+
+### 🧩 Kod & DB
+- **DB Guard (Alembic)**
+  - `20250821_enforce_positive_open_trade_insert.py`:
+    - `strategy_open_trades` BEFORE INSERT tetikleyicisi:
+      - `entry_price > 0`, `position_size > 0`, `leverage > 0`.
+- **Trade Güvenliği**
+  - `crud/trade.py`: kapanış fiyatı seçimi (close_price) **0’a düşmeyecek** güvenli seçim; PnL hesapları testlerle doğrulandı.
+- **Testler**
+  - `tests/test_trade_helpers.py` eklendi (yardımcı fonksiyonlar).
+- **Araçlar / Stil**
+  - `pre-commit` (ruff, black, EOF fixer) aktif; uyarılar temizlendi.
+  - `zip_logger_backup.py` yol/sonsatır düzeni; `schema/` yapısı **db/json/skeletons** altına ayrıldı; guard patch’ler eklendi.
+
+### 🔧 Yükseltme Adımları
+1. **Migrasyon:** `alembic upgrade head`
+2. **Statik sürüm etiketleri:** `panel.js`, `panel_equity.js`, `panel_extras.css` için `?v=` değerlerini güncelle.
+3. **Tarayıcı:** Hard refresh (Ctrl+F5).
+
+### 📌 Notlar
+- Görünürlük akışı: **Misafir** (gizli) → **Girişli** (işlem tabloları) → **Referanslı** (KPI + Equity).
+- Borsa tarihleri **her zaman UTC** (ISO/epoch destekli).
+- Breaking changes: **Yok**.
+
 ## v1.0.0 — 2025-08-20 🎉 (TODAY'S DATE)
 
 ### 🚀 BÜYÜK TEMİZLİK VE STABİLİZASYON
