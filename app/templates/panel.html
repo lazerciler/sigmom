@@ -19,7 +19,7 @@
     <div class="max-w-7xl mx-auto px-4 lg:px-6 h-14 flex items-center justify-between">
       <div class="flex items-center gap-3">
         <span class="h-6 w-6 rounded bg-indigo-600 text-white grid place-items-center text-xs font-semibold">S</span>
-        <span class="text-sm font-medium text-slate-500 dark:text-slate-400">Panel</span>
+        <span class="text-sm font-medium text-slate-500 dark:text-slate-400">Sigmom Panel</span>
       </div>
 
       <div class="flex items-center gap-3">
@@ -72,7 +72,7 @@
           </div>
           <div id="chart" class="h-[380px] sm:h-[440px] min-h-[260px]"></div>
           <div id="data-disclaimer" class="px-4 py-2 text-[11px] text-slate-500 dark:text-slate-400 border-t border-slate-200 dark:border-slate-700">
-            SIGMOM - SAI (Signal Alert Interface)
+            SAI (Signal Alert Interface)
           </div>
         </div>
       </div>
@@ -84,7 +84,7 @@
 
           <dl class="text-sm grid grid-cols-3 gap-y-2">
             <dt class="col-span-1 text-slate-500">Hesap sahibi</dt>
-            <dd class="col-span-2 truncate text-right">{{ user.name or user.email if user else '⚠' }}</dd>
+            <dd class="col-span-2 truncate text-right">{{ user.name or user.email if user else '⚠ Ziyaretçi' }}</dd>
             <dt class="col-span-1 text-slate-500">Erişim</dt>
             <dd id="access-level" class="col-span-2 text-right">{% if user and referral_verified %}
               Asil (tam){% elif user %}
@@ -105,7 +105,16 @@
             <!-- Güncel Duyuru (yalnızca referansı olmayanlar) -->
             <h4 class="text-sm font-semibold mb-2">Güncel Duyuru</h4>
             <p class="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
-              Panel şu an görüntüleme modunda. Bazı bölümlere erişim, referans doğrulaması sonrası açılır.
+              Bazı özelliklere erişim referans doğrulaması gerektirir.
+              Şu anda tüm referans kontenjanı doludur.
+            </p>
+            <p id="guest-tip" class="mt-2 text-slate-500 dark:text-slate-300 text-sm">
+              <a href="/auth/google/login"
+                 class="!text-emerald-400 hover:!text-emerald-300 visited:!text-emerald-400
+                        underline decoration-emerald-400/70 hover:decoration-emerald-300
+                        underline-offset-4 transition-colors cursor-pointer">
+                Google hesabınız ile giriş yaparak standart özelliklerden ücretsiz yararlanabilirsiniz.
+              </a>
             </p>
             {% if user %}
               <button id="open-referral"
@@ -115,19 +124,22 @@
             {% endif %}
           {% else %}
             <!-- Hızlı Bakiye Özeti (Asil Üye) -->
-            <h4 class="text-sm font-semibold mb-2">Hızlı Bakiye Özeti</h4>
+            <h4 class="text-sm font-semibold mb-2">📝 Hızlı Bakiye Özeti</h4>
             <ul id="qb-list" class="text-sm grid grid-cols-1 gap-y-1">
               <li class="flex items-center justify-between">
-                <span>Bakiye</span><span id="qb-wallet">—</span>
+                <span>Serbest Bakiye (Cüzdan)</span><span id="qb-wallet">—</span>
               </li>
               <li class="flex items-center justify-between">
                 <span>Net PnL</span><span id="qb-net">—</span>
               </li>
               <li class="flex items-center justify-between">
+                <span>Gerçekleşmemiş PnL</span><span id="qb-upnl">—</span>
+              </li>
+              <li class="flex items-center justify-between">
                 <span>Açık Pozisyon</span><span id="qb-open">—</span>
               </li>
               <li class="flex items-center justify-between">
-                <span>Son İşlem</span>
+                <span>Son Kapanan</span>
                 <span id="qb-last" class="text-xs leading-snug whitespace-nowrap truncate">—</span>
               </li>
             </ul>
@@ -153,50 +165,53 @@
     </section>
 
     <!-- user.referral_verified için kesin hüküm -->
-    <script>window.EQUITY_ALLOWED = {{ (referral_verified | default(false)) | tojson }};</script>
+    <script>
+      window.TRADES_ALLOWED = {{ (user is not none) | tojson }};
+      window.EQUITY_ALLOWED = {{ (referral_verified | default(false)) | tojson }};
+      window.KPI_ALLOWED = window.EQUITY_ALLOWED;
+    </script>
 
     <!-- Tablolar yer tutucu -->
-    <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <div class="card shadow-sm p-4"><h3 class="text-sm font-semibold mb-3">Açık pozisyonlar (Borsa tarafı)</h3>
-        <div id="open-positions" class="text-sm text-slate-500">—</div></div>
-      <div class="card shadow-sm p-4"><h3 class="text-sm font-semibold mb-3">Kapanan işlemler (Borsa tarafı)</h3>
-        <div id="recent-trades" class="text-sm text-slate-500 h-12 overflow-y-auto overscroll-contain pr-1">—</div></div>
+    <section id="sec-trades"
+           class="grid grid-cols-1 lg:grid-cols-2 gap-6 {% if not user %}hidden{% endif %}">
+
+      <div class="card shadow-sm p-4"><h3 class="text-sm font-semibold mb-3">Açılan Emirler (Borsa tarafı)</h3>
+        <div id="open-positions"
+             class="text-sm text-slate-500 h-14 overflow-auto overscroll-contain pr-1">—</div></div>
+
+      <div class="card shadow-sm p-4"><h3 class="text-sm font-semibold mb-3">Kapanan Emirler. (Borsa tarafı)</h3>
+        <div id="recent-trades"
+             class="text-sm text-slate-500 h-14 overflow-auto overscroll-contain pr-1">—</div></div>
+
     </section>
 
-          <!-- KPI -->
-    <section class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+    <!-- 30G KPI -->
+    <section id="kpi-30d"
+     class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 {% if not referral_verified %}hidden{% endif %}">
       <div class="kpi"><h6>PnL (7g)</h6><div id="kpi-pnl">—</div></div>
-      <div class="kpi"><h6>WINRATE (30g)</h6><div id="kpi-win">—</div></div>
+      <div class="kpi"><h6>KAZANMA ORANI (30g)</h6><div id="kpi-win">—</div></div>
       <div class="kpi"><h6>AÇIK POZİSYON</h6><div id="kpi-open">—</div></div>
-      <div class="kpi"><h6>MAX DD (30g)</h6><div id="kpi-dd">—</div></div>
-      <div class="kpi"><h6>SHARPE RATIO (30g)</h6><div id="kpi-sharpe">—</div></div>
+      <div class="kpi"><h6>MAKS. DÜŞÜŞ (30g)</h6><div id="kpi-dd">—</div></div>
+      <div class="kpi"><h6>SHARPE ORANI (30g)</h6><div id="kpi-sharpe">—</div></div>
       <div class="kpi"><h6>SON İŞLEM</h6><div id="kpi-last" class="text-xs">—</div></div>
     </section>
 
-
     <!-- ===== EQUITY (Balance) KPI'ları ===== -->
-    <section id="equity-kpi" class="hidden grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
-      <div class="kpi"><h6>CURRENT BALANCE</h6><div id="stat-balance">—</div></div>
-      <div class="kpi"><h6>Net Profit</h6><div id="stat-net">—</div></div>
-      <div class="kpi"><h6>WIN RATE</h6><div id="stat-win">—</div></div>
-      <div class="kpi"><h6>SHARPE RATIO</h6><div id="stat-sharpe">—</div></div>
-      <div class="kpi"><h6>MAX DRAWDOWN</h6><div id="stat-mdd">—</div></div>
-      <div class="kpi"><h6>ANNUAL RETURN</h6><div id="stat-cagr">—</div></div>
+    <section id="equity-kpi"
+     class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 {% if not referral_verified %}hidden{% endif %}">
+      <div class="kpi"><h6>NET KÂR</h6><div id="stat-net">—</div></div>
+      <div class="kpi"><h6>KAZANMA ORANI</h6><div id="stat-win">—</div></div>
+      <div class="kpi"><h6>MEVCUT BAKİYE</h6><div id="stat-balance">—</div></div>
+      <div class="kpi"><h6>MAKS. DÜŞÜŞ</h6><div id="stat-mdd">—</div></div>
+      <div class="kpi"><h6>SHARPE ORANI</h6><div id="stat-sharpe">—</div></div>
+      <div class="kpi"><h6>YILLIK GETİRİ</h6><div id="stat-cagr">—</div></div>
     </section>
 
-
     <!-- ===== EQUITY (Balance) Grafiği + CAP ===== -->
-    <section class="mt-6">
+    <section class="mt-6 {% if not referral_verified %}hidden{% endif %}">
       <div class="card shadow-sm">
         <div class="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700">
           <h3 class="text-sm font-semibold">Bakiye</h3>
-<!--
-          <button id="cap-btn"
-            class="h-8 px-3 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 transition
-                   dark:border-slate-600 dark:text-slate-100 dark:hover:bg-slate-800 text-sm">
-            CAP
-          </button>
--->
         </div>
         <div class="p-4">
           <div class="w-full h-80">
@@ -205,18 +220,28 @@
         </div>
       </div>
     </section>
-  </main>
+
   <!-- Lightweight Charts -->
   <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js" defer></script>
 
   <!-- Chart.js -->
+<!--  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>-->
+<!--  <script src="https://cdn.jsdelivr.net/npm/moment"></script>-->
+<!--  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment"></script>-->
+
+  {% if referral_verified %}
+  <!-- Chart.js (yalnız referansı doğrulanmış kullanıcılar için) -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/moment"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment"></script>
+  {% endif %}
+
 
   <!-- Panel / Panel JS -->
-  <script src="{{ url_for('static', path='js/panel.js') }}?v=20250820sa" defer></script>
-  <script src="{{ url_for('static', path='js/panel_equity.js') }}?v=20250819c" defer></script>
+  <script src="{{ url_for('static', path='js/panel.js') }}?v=20250822fa" defer></script>
+  {% if referral_verified %}
+  <script src="{{ url_for('static', path='js/panel_equity.js') }}?v=20250822ea" defer></script>
+  {% endif %}
 
   <!-- Referans modal -->
   <dialog id="ref-modal" class="backdrop:bg-black/50 rounded-xl p-0 w-full max-w-md">
@@ -240,5 +265,26 @@
     <span class="text-rose-700 bg-rose-50 border-rose-200 dark:text-rose-200 dark:bg-rose-500/20 dark:border-rose-300/40"></span>
   </div>
 
+    <footer class="mt-10">
+      <div class="h-px bg-slate-800/60"></div>
+      <div class="max-w-6xl mx-auto px-4">
+        <div class="py-3 text-[12.5px] text-center text-slate-500">
+          © <span id="ft-year-b"></span> Sigmom SAI —
+          <a href="/legal/terms" class="text-emerald-400 hover:text-emerald-300 underline underline-offset-4">Kullanım Şartları</a>
+          <span class="mx-1 text-slate-600">·</span>
+          <a href="/legal/privacy" class="text-emerald-400 hover:text-emerald-300 underline underline-offset-4">Gizlilik</a>
+        </div>
+        <p class="text-emerald-600 hover:text-emerald-500 dark:text-emerald-400 dark:hover:text-emerald-300
+          underline decoration-emerald-600/70 dark:decoration-emerald-400/70 hover:decoration-emerald-500
+          underline-offset-4 transition-colors">
+          Google ile Giriş, Google LLC tarafından sağlanır.
+          <a target="_blank" rel="noopener" href="https://policies.google.com/terms" class="hover:text-slate-400">Şartlar</a> ·
+          <a target="_blank" rel="noopener" href="https://policies.google.com/privacy" class="hover:text-slate-400">Gizlilik</a>
+        </p>
+      </div>
+    </footer>
+    <script>try{document.getElementById('ft-year-b').textContent=new Date().getFullYear()}catch{}</script>
+
+  </main>
 </body>
 </html>

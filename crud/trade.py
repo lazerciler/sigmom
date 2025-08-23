@@ -13,17 +13,45 @@ from app.utils.position_utils import position_matches, confirm_open_trade
 from sqlalchemy import text
 
 
+def pick_close_price(position_data: dict) -> Decimal:
+    """Select a valid (>0) close price from common execution/market fields.
+    Never fall back to entryPrice or 0.
+    Preference: avgClosePrice, avgPrice, price, lastPrice, closePrice, markPrice.
+    """
+    for key in (
+        "avgClosePrice",
+        "avgPrice",
+        "price",
+        "lastPrice",
+        "closePrice",
+        "markPrice",
+    ):
+        v = position_data.get(key)
+        if v is None or str(v).strip() == "":
+            continue
+        d = Decimal(str(v))
+        if d > 0:
+            return d
+    raise ValueError(f"Geçerli close_price bulunamadı: position_data={position_data}")
+
+
+def compute_pnl(
+    side: str, entry_price: Decimal, exit_price: Decimal, position_size: Decimal
+) -> Decimal:
+    s = (side or "").lower()
+    if s == "long":
+        return (exit_price - entry_price) * position_size
+    if s == "short":
+        return (entry_price - exit_price) * position_size
+    raise ValueError(f"Geçersiz side='{side}'")
+
+
 async def get_open_trade_for_close(
     db: AsyncSession,
     public_id: Optional[str],  # str | None yerine Optional[str]
     symbol: str,
     exchange: str,
 ) -> Union[StrategyOpenTrade, None]:  # StrategyOpenTrade | None yerine
-    # """
-    # Close sinyali geldiğinde kapatılacak open trade'i güvenli biçimde seçer.
-    # - Öncelik public_id (tekil ve güvenli).
-    # - public_id yoksa: symbol+exchange+status='open' içinden EN SON kaydı alır.
-    # """
     # if public_id:
     """
     Close sinyali geldiğinde kapatılacak open trade'i güvenli biçimde seçer.
@@ -42,16 +70,6 @@ async def get_open_trade_for_close(
         )
         res = await db.execute(q)
         return res.scalar_one_or_none()
-
-    # q = (
-    #     select(StrategyOpenTrade)
-    #     .where(
-    #         StrategyOpenTrade.symbol == symbol,
-    #         StrategyOpenTrade.exchange == exchange,
-    #         StrategyOpenTrade.status == "open",
-    #     )
-    #     .order_by(desc(StrategyOpenTrade.timestamp))
-    # )
 
     # Fallback: latest OPEN by symbol+exchange (case-insensitive symbol)
     q = (
@@ -82,17 +100,50 @@ async def close_open_trade_and_record(
     logger = logging.getLogger("verifier")
 
     try:
-        close_price = Decimal(
-            str(position_data.get("markPrice") or position_data.get("entryPrice") or 0)
-        )
-        open_price = trade.entry_price
-        position_size = trade.position_size
+        # Row lock: aynı trade'i paralel kapanışlardan koru
+        trade = (
+            await db.execute(
+                select(StrategyOpenTrade)
+                .where(StrategyOpenTrade.id == trade.id)
+                .with_for_update()
+            )
+        ).scalar_one()
+        # Idempotency: zaten closed ise ikinci kez işlem yapma
+        if (getattr(trade, "status", "") or "").lower() == "closed":
+            logger.warning(
+                f"[idempotent-skip] {trade.symbol} already CLOSED → {trade.public_id}"
+            )
+            return
 
-        pnl = (
-            (close_price - open_price) * position_size
-            if trade.side.lower() == "long"
-            else (open_price - close_price) * position_size
+        # --- SAFE close price: asla entryPrice/0 değil ---
+        close_price = pick_close_price(position_data)
+        # Audit: kapanış fiyatı hangi alandan geldi?
+        _keys = (
+            "avgClosePrice",
+            "avgPrice",
+            "price",
+            "lastPrice",
+            "closePrice",
+            "markPrice",
         )
+        _src = next((k for k in _keys if str(position_data.get(k)).strip()), None)
+        logger.info(f"[close-price-source] {trade.symbol} → {_src}={close_price}")
+
+        # --- Zorunlu alanlar / guard'lar ---
+        open_price = Decimal(str(trade.entry_price))
+        if open_price <= 0:
+            raise ValueError(f"Geçersiz entry_price={open_price}")
+
+        position_size = Decimal(str(trade.position_size))
+        if position_size <= 0:
+            raise ValueError(f"Geçersiz position_size={position_size}")
+
+        side = (getattr(trade, "side", "") or "").lower()
+        if side not in ("long", "short"):
+            raise ValueError(f"Geçersiz side={trade.side}")
+
+        # --- PnL ---
+        pnl = compute_pnl(side, open_price, close_price, position_size)
 
         closed_trade = StrategyTrade(
             public_id=str(uuid.uuid4()),
@@ -109,7 +160,21 @@ async def close_open_trade_and_record(
             timestamp=datetime.utcnow(),
             exchange=trade.exchange,
             fund_manager_id=trade.fund_manager_id,
-            response_data=trade.response_data or {},
+            # audit için kapanış anındaki fiyat alanlarını sakla
+            response_data={
+                **(trade.response_data or {}),
+                "position_snapshot": {
+                    k: position_data.get(k)
+                    for k in (
+                        "avgClosePrice",
+                        "avgPrice",
+                        "price",
+                        "lastPrice",
+                        "closePrice",
+                        "markPrice",
+                    )
+                },
+            },
         )
 
         # Trade tablosuna ekle
@@ -137,7 +202,7 @@ async def close_open_trade_and_record(
                     FROM strategy_trades
                     WHERE open_trade_public_id = :otpid
                     ORDER BY id DESC LIMIT 1
-                """
+                    """
                 ),
                 {"otpid": trade.public_id},
             )

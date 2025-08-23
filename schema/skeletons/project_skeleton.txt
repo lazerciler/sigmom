@@ -3,12 +3,13 @@
 ├── .gitattributes
 ├── .gitignore
 ├── .pre-commit-config.yaml
-├── LICENSE
-├── README.md
-├── RELEASE_NOTES.md
 ├── alembic.ini
 ├── env.example
+├── LICENSE
 ├── pyproject.toml
+├── pytest.ini
+├── README.md
+├── RELEASE_NOTES.md
 ├── requirements-dev.txt
 ├── requirements.txt
 ├── tailwind.config.js
@@ -16,24 +17,6 @@
 ├── .github/
 │   └── workflows/
 │       └── ci.yml
-├── .pytest_cache/
-│   ├── .gitignore
-│   ├── CACHEDIR.TAG
-│   ├── README.md
-│   └── v/
-│       └── cache/
-│           ├── lastfailed
-│           └── nodeids
-├── .ruff_cache/
-│   ├── .gitignore
-│   ├── CACHEDIR.TAG
-│   └── 0.5.6/
-│       ├── 12799462895772747705
-│       ├── 15926909636308293352
-│       ├── 16895479289967775613
-│       ├── 3689884287718564421
-│       ├── 918639703481191047
-│       └── 9353308796879435404
 ├── app/
 │   ├── __init__.py
 │   ├── config.py
@@ -78,8 +61,7 @@
 │   │   ├── css/
 │   │   │   ├── input.css
 │   │   │   ├── panel_extras.css
-│   │   │   ├── tw.css
-│   │   │   └── tw.src.css
+│   │   │   └── tw.css
 │   │   ├── img/
 │   │   │   └── logo.svg
 │   │   └── js/
@@ -105,7 +87,6 @@
 │   ├── raw_signal.py
 │   └── trade.py
 ├── migrations/
-│   ├── README
 │   ├── env.py
 │   ├── script.py.mako
 │   └── versions/
@@ -119,6 +100,7 @@
 │       ├── 1f1d2fb58a3b_add_exchange_column_to_strategy_tables.py
 │       ├── 20250809_add_referral_system.py
 │       ├── 20250810_add_available_to_referral_status_enum_add_available_to_referral_status_enum.py
+│       ├── 20250821_enforce_positive_open_trade_insert.py
 │       ├── 20a331d96d22_your_next_change.py
 │       ├── 3eb8b25f3944_your_next_change.py
 │       ├── 541fa9870fda_increase_exchange_field_length.py
@@ -128,13 +110,24 @@
 │       ├── ef846562f771_add_leverage_to_strategy_trades.py
 │       └── efc05fe65026_increase_exchange_field_length.py
 ├── schema/
-│   ├── acceptable_json_examples.txt
-│   ├── project_skeleton.txt
-│   └── sigmom_pro_v1_20250813_dump.sql
+│   ├── db/
+│   │   ├── README.md
+│   │   ├── first-time-OLD/
+│   │   │   └── sigmom_pro_v1_20250813_dump.sql
+│   │   ├── patches/
+│   │   │   └── schema_guard_patch.sql
+│   │   └── snapshots/
+│   │       └── sigmom_empty_structure_20250822.sql
+│   ├── json/
+│   │   ├── acceptable_json_examples.txt
+│   │   └── README.md
+│   └── skeletons/
+│       └── project_skeleton.txt
 ├── scripts/
-│   ├── README.txt
 │   ├── generate_timestamp.py
 │   ├── idtest.py
+│   ├── README.md
 │   ├── seed_demo_users.py
 │   └── zip_logger_backup.py
 └── tests/
+    └── test_trade_helpers.py

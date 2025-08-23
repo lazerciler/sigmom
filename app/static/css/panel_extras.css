@@ -37,7 +37,8 @@ dialog#ref-modal::backdrop { background: rgba(0,0,0,0.5); }
   --sb-track: rgba(30,41,59,.55);     /* slate-800 */
   --sb-thumb: rgba(148,163,184,.55);  /* slate-400 */
 }
-#recent-trades::-webkit-scrollbar{ width:8px; }
+
+#recent-trades::-webkit-scrollbar{ width:8px; height:8px; }
 #recent-trades::-webkit-scrollbar-track{ background:transparent; }
 #recent-trades::-webkit-scrollbar-thumb{
   background-color: var(--sb-thumb);
@@ -45,10 +46,63 @@ dialog#ref-modal::backdrop { background: rgba(0,0,0,0.5); }
   border: 2px solid transparent;      /* iç boşluk (inset görünüm) */
   background-clip: content-box;
 }
+
 #recent-trades:hover::-webkit-scrollbar-thumb{
+  background-color: var(--sb-thumb);   /* hover’da biraz daha belirgin */
+}
+
+/* Açık işlemler: kart içinde dikey scroll (dark uyumlu, kaymasız) */
+#open-positions{
+  max-height: 16rem;          /* dilediğin gibi: 12rem/20rem */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;    /* scrollbar var/yok layout kaydırmasın */
+  -webkit-overflow-scrolling: touch;
+  /* Light vars */
+  --sb-track: rgba(203,213,225,.12);  /* slate-300 */
+  --sb-thumb: rgba(100,116,139,.55);  /* slate-500 */
+  scrollbar-width: thin;                   /* Firefox */
+  scrollbar-color: var(--sb-thumb) transparent;
+}
+.dark #open-positions{
+  /* Dark vars */
+  --sb-track: rgba(30,41,59,.55);     /* slate-800 */
+  --sb-thumb: rgba(148,163,184,.55);  /* slate-400 */
+}
+
+#open-positions::-webkit-scrollbar{ width:8px; height:8px; }
+#open-positions::-webkit-scrollbar-track{ background:transparent; }
+#open-positions::-webkit-scrollbar-thumb{
+  background-color: var(--sb-thumb);
+  border-radius: 8px;
+  border: 2px solid transparent;      /* iç boşluk (inset görünüm) */
+  background-clip: content-box;
+}
+
+#open-positions:hover::-webkit-scrollbar-thumb{
   background-color: var(--sb-thumb);   /* hover’da biraz daha belirgin */
 }
 
 /* Dark temayı tabanda zorla: Tailwind sırası değişse de gövde koyu kalsın */
 html.dark { color-scheme: dark; }
 html.dark body { background: #0f172a; color: #e2e8f0; } /* slate-900 / slate-200 */
+
+#guest-tip a{
+color:#34d399;                 /* emerald-400 */
+text-decoration:underline;
+text-decoration-color:#34d399B3; /* ~70% */
+}
+#guest-tip a:hover{
+color:#6ee7b7;                 /* emerald-300 */
+text-decoration-color:#6ee7b7;
+}
+
+/* Satırları küçült */
+#open-positions > div > .grid,
+#recent-trades  > div > .grid { font-size: 0.75rem; } /* text-xs */
+
+/* Sembol bir tık büyük kalsın */
+/*
+#open-positions .font-medium,
+#recent-trades  .font-medium { font-size: 0.875rem; } /* text-sm */
+*/

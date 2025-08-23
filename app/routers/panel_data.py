@@ -1,8 +1,11 @@
-# app/routers/panel_data.py — PUBLIC görünürlük (tüm veriler)
+#!/usr/bin/env python3
+# app/routers/panel_data.py
+# Python 3.9
 from typing import Dict, List, Optional, Literal, Sequence
 from datetime import datetime, timezone, timedelta
-
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
+import importlib
+import inspect
 from pydantic import BaseModel
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -102,8 +105,10 @@ async def markers_public(
 ):
     """
     Borsa onaylı veriden marker üretir:
-    - Hâlâ açık pozisyonlar (strategy_open_trades.status='open') -> OPEN
-    - Kapanmış işlemler (strategy_trades) -> aynı open_trade_public_id için EN SON kapanış + eşleşen açılış -> OPEN+CLOSE
+    - Hâlâ açık pozisyonlar:
+    (strategy_open_trades.status='open') -> OPEN
+    - Kapanmış işlemler:
+    (strategy_trades) -> aynı open_trade_public_id için EN SON kapanış + eşleşen açılış -> OPEN+CLOSE
     """
     # --- sembol filtresi ---
     sym_list: Optional[Sequence[str]] = None
@@ -146,33 +151,6 @@ async def markers_public(
             )
         )
 
-    # for r in open_rows:
-    #     side = (str(getattr(r, "side", "")).lower() if hasattr(r, "side") else "")
-    #     is_long = side == "long"
-    #     pos = "belowBar" if is_long else "aboveBar"
-    #
-    #     t = _to_epoch(r.timestamp)  # Zaten UTC timestamp dönüyor
-    #
-    #     if bar_sec:  # Sadece timeframe varsa hizala
-    #         # UTC zamanını timeframe'e göre yuvarla (yerel saat dilimini etkilemeden)
-    #         tb = (t // bar_sec) * bar_sec
-    #     else:
-    #         tb = t
-    #
-    #     markers.append(Marker(
-    #         symbol=str(r.symbol),
-    #         time=tb,  # Düzeltilmiş zaman
-    #         position=pos,
-    #         text="OPEN LONG" if is_long else "OPEN SHORT",
-    #         price=_f(getattr(r, "entry_price", None)),
-    #         id=str(r.public_id),
-    #         kind="open",
-    #         side=("long" if is_long else "short") if side in ("long", "short") else None,
-    #         time_bar=tb if bar_sec else None,
-    #         is_live=True,
-    #     ))
-
-    # === 2) Kapanmış işlemler -> son CLOSE + karşılığı OPEN ===
     q_tr = select(StrategyTrade)
     if sym_list:
         q_tr = q_tr.where(func.upper(StrategyTrade.symbol).in_(sym_list))
@@ -409,3 +387,55 @@ async def overview_public(
             last_sig.isoformat().replace("+00:00", "Z") if last_sig else None
         ),
     }
+
+
+# Bakiye (borsa-agnostik) — iş mantığı account.py’de
+
+
+@router.get("/balance")
+async def me_balance(
+    exchange: str = Query(
+        "binance_futures_testnet", description="örn. binance_futures_testnet"
+    ),
+    asset: Optional[str] = Query(None, description="USDT, USDC, FDUSD, BTC..."),
+    symbol: Optional[str] = Query(
+        None, description="BTCUSDT, ETHBTC, ETHBTC.P, ETH/BTC, BTCUSD_PERP ..."
+    ),
+    currency: Optional[str] = Query(
+        None, description="Sinyal JSON 'currency' alanı (varsa öncelikli)"
+    ),
+    all: bool = Query(False, description="Tüm bakiyeleri ham liste olarak döndür"),
+):
+    try:
+        mod = importlib.import_module(f"app.exchanges.{exchange}.account")
+        fn = getattr(mod, "get_available", None) or getattr(
+            mod, "get_available_balance", None
+        )
+        if not callable(fn):
+            raise RuntimeError(f"{exchange}.account içinde get_available(...) yok")
+        if inspect.iscoroutinefunction(fn):
+            return await fn(
+                asset=asset, symbol=symbol, currency=currency, return_all=all
+            )
+        # Sync implementasyon varsa:
+        return fn(asset=asset, symbol=symbol, currency=currency, return_all=all)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/unrealized")
+async def me_unrealized(
+    exchange: str = Query("binance_futures_testnet"),
+    symbol: Optional[str] = Query(None),
+    all: bool = Query(False),
+):
+    try:
+        mod = importlib.import_module(f"app.exchanges.{exchange}.account")
+        fn = getattr(mod, "get_unrealized", None)
+        if not callable(fn):
+            raise RuntimeError(f"{exchange}.account içinde get_unrealized(...) yok")
+        if inspect.iscoroutinefunction(fn):
+            return await fn(symbol=symbol, return_all=all)
+        return fn(symbol=symbol, return_all=all)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))

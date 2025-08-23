@@ -1,10 +1,17 @@
-// app/static/js/panel.js
+// app/static/js/panel_equity.js
 // SIGMOM — Equity Module (STRICT: backend fields only)
 // Uses only `timestamp` and `realized_pnl` from backend rows.
-// Locale-aware, fixed START_CAPITAL, no CAP button, no quote inference.
+// Locale-aware, backend-derived START_CAPITAL, no CAP button, no quote inference.
 (() => {
+  // Değişiklik izleme
+  let _lastOpenCount = null;
+  let _lastRecentHash = '';
+  const _hashRecent = (arr) =>
+    (Array.isArray(arr) ? arr.map(r => r.public_id || r.id || r.timestamp).join('|') : '');
+
   // ---- CONFIG ----
-  const START_CAPITAL = 8372.30;    // fixed starting capital (edit in code)
+  // Başlangıç sermayesi sadece backend’den gelir (ilk başta bilinmiyor)
+  let START_CAPITAL = null;
   const MIN_CAGR_DAYS = 21;      // don't show annual return for shorter spans
   const MAX_ANNUAL_PCT = 5000;   // cap display to +/- 5000% to avoid silly numbers
 
@@ -24,13 +31,6 @@
     const c = document.getElementById('equityChart');
     const card = c?.closest('.card') || c?.parentElement || null;
     if (card) card.style.display = 'none';
-
-//    // İsteğe bağlı kısa bilgi notu
-//    const holder = (kpi && kpi.parentElement) || document.body;
-//    const note = document.createElement('div');
-//    note.className = 'mt-4 text-sm text-slate-500 dark:text-slate-400';
-//    note.textContent = 'Bazı bölümlere erişim referans onayı gerektirir.';
-//    holder.appendChild(note);
   }
 
   // ---- Locale ----
@@ -85,25 +85,21 @@
     const map = new Map(); // yyyy-mm-dd -> pnl
     rows.forEach((t) => {
       const d = t.__ts;
-      const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(
-        2,
-        "0"
-      )}-${String(d.getDate()).padStart(2, "0")}`;
+      const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
       map.set(k, (map.get(k) || 0) + (Number.isFinite(t.__pnl) ? t.__pnl : 0));
     });
-    const days = Array.from(map.keys()).sort(
-      (a, b) => new Date(a) - new Date(b)
-    );
+    const days = Array.from(map.keys()).sort((a, b) => new Date(a) - new Date(b));
     return { days, dayPnls: days.map((k) => map.get(k) || 0) };
   }
 
-  function computeStats(rows) {
-    const cap = START_CAPITAL;
+  function sumPnl(rows){
+    return rows.reduce((a,b)=> a + (Number.isFinite(b.__pnl) ? b.__pnl : 0), 0);
+  }
+
+  function computeStats(rows, capOverride) {
+    const cap = (typeof capOverride === 'number') ? capOverride : START_CAPITAL;
     const sorted = rows.slice().sort((a, b) => a.__ts - b.__ts);
-    const sum = sorted.reduce(
-      (a, b) => a + (Number.isFinite(b.__pnl) ? b.__pnl : 0),
-      0
-    );
+    const sum = sumPnl(sorted);
     const balance = cap + sum;
     const win = sorted.length
       ? (sorted.filter((x) => (x.__pnl || 0) > 0).length / sorted.length) * 100
@@ -129,9 +125,7 @@
     }
 
     // Max Drawdown via equity curve
-    let peak = cap,
-      mdd = 0,
-      run = cap;
+    let peak = cap, mdd = 0, run = cap;
     sorted.forEach((t) => {
       run += Number.isFinite(t.__pnl) ? t.__pnl : 0;
       peak = Math.max(peak, run);
@@ -141,10 +135,7 @@
 
     // Annualized return with guard
     const spanDays = days.length
-      ? Math.max(
-          (new Date(days[days.length - 1]) - new Date(days[0])) / 86400000,
-          0
-        )
+      ? Math.max((new Date(days[days.length - 1]) - new Date(days[0])) / 86400000, 0)
       : 0;
     let cagr = null;
     if (spanDays >= MIN_CAGR_DAYS) {
@@ -164,8 +155,8 @@
   }
 
   // ---- Equity series ----
-  function buildEquity(rows) {
-    const cap = START_CAPITAL;
+  function buildEquity(rows, capOverride) {
+    const cap = (typeof capOverride === 'number') ? capOverride : START_CAPITAL;
     const sorted = rows.slice().sort((a, b) => a.__ts - b.__ts);
     const pts = [];
     let bal = cap;
@@ -239,6 +230,42 @@
       clearTimeout(t);
     }
   }
+
+  // --- Sinyallerden aktif sembolü çıkar (sabit/gömme yok) ---
+  async function resolveActiveSymbol() {
+    // 1) Açık pozisyonlardan
+    try {
+      const items = await getJSON(`/api/me/open-trades`);
+      if (Array.isArray(items) && items.length && items[0]?.symbol) {
+        return String(items[0].symbol).toUpperCase();
+      }
+    } catch {}
+    // 2) Son işlemden
+    try {
+      const arr = await getJSON(`/api/me/recent-trades?limit=1`);
+      const t = Array.isArray(arr) ? arr[0] : (arr && arr[0]);
+      if (t?.symbol) return String(t.symbol).toUpperCase();
+    } catch {}
+    // 3) UI seçicisinden (varsa) ya da güvenli bir fallback
+    const el = document.querySelector('[data-symbol-picker]');
+    return (el?.value || 'BTCUSDT').toUpperCase();
+  }
+
+  // --- Başlangıç sermayesini backend cüzdanından çek ---
+  async function initStartCapital() {
+    try {
+      const sym = await resolveActiveSymbol();
+      const qs = new URLSearchParams({ symbol: sym });
+      const j = await getJSON(`/api/me/balance?` + qs.toString());
+      // Tercih: balance > available
+      const v = Number(j?.balance ?? j?.available);
+      START_CAPITAL = Number.isFinite(v) ? v : 0;
+    } catch {
+      if (!Number.isFinite(START_CAPITAL)) START_CAPITAL = 0;
+    }
+    return START_CAPITAL;
+  }
+
   async function loadTrades() {
     const raw = await getJSON(`/api/me/recent-trades?limit=200`);
     return unwrap(raw).map(normalizeTrade).filter(Boolean);
@@ -248,17 +275,23 @@
   async function refresh() {
     try {
       const rows = await loadTrades();
-      const stats = computeStats(rows);
-      const equity = buildEquity(rows);
-
-      if (els.statBal) els.statBal.textContent = nf2.format(stats.balance);
-      if (els.statNet)
-        els.statNet.textContent =
-          (stats.net >= 0 ? "+" : "-") + nf2.format(Math.abs(stats.net));
-      if (els.statWin) els.statWin.textContent = nf2.format(stats.win) + "%";
-      if (els.statSharpe) els.statSharpe.textContent = nf2.format(stats.sharpe);
-      if (els.statMdd) els.statMdd.textContent = nf2.format(stats.mdd * 100) + "%";
-      if (els.statCagr) els.statCagr.textContent = fmtAnnualPct(stats.cagr);
+      // CÜZDANI HER YENİLEMEDE GÜNCELLE (işlem kapanınca değişir)
+      try { await initStartCapital(); } catch {}
+      const walletNow = START_CAPITAL;
+      // Grafiğin referansı: "bugünkü cüzdan" - "grafikte topladığımız realize PnL"
+      const baseCap = walletNow - sumPnl(rows);
+      // ALL (yüklü işlemler) – çiftlemeyi önlemek için 30G filtresi kaldırıldı
+      const statsAll = computeStats(rows, baseCap);
+      const equity   = buildEquity(rows, baseCap);
+      // Karttaki bakiye: doğrudan güncel cüzdan (all-time)
+      if (els.statBal) els.statBal.textContent = nf2.format(walletNow);
+      // Net Profit (ALL)
+      if (els.statNet)    els.statNet.textContent =
+        (statsAll.net >= 0 ? "+" : "−") + nf2.format(Math.abs(statsAll.net));
+      if (els.statWin)    els.statWin.textContent    = nf2.format(statsAll.win) + "%";
+      if (els.statSharpe) els.statSharpe.textContent = nf2.format(statsAll.sharpe);
+      if (els.statMdd)    els.statMdd.textContent    = nf2.format(statsAll.mdd * 100) + "%";
+      if (els.statCagr)   els.statCagr.textContent   = fmtAnnualPct(statsAll.cagr);
 
       drawChart(equity);
     } catch (e) {
@@ -266,12 +299,68 @@
     }
   }
 
-  document.addEventListener("DOMContentLoaded", () => {
-    // Quick Balance kartı panel.js'te aynı değeri kullanabilsin
-    try { window.START_CAPITAL = START_CAPITAL; } catch {}
+  document.addEventListener("DOMContentLoaded", async () => {
     const allowed = checkEquityAllowed();
     if (!allowed) { lockEquityUI(); return; }
 
-    refresh();
+    // Allowed ise KPI grid'i görünür yap
+    try { document.getElementById('equity-kpi')?.classList.remove('hidden'); } catch {}
+
+    // Başlangıç sermayesini (bakiye) backend'den oku, sonra çiz
+    await initStartCapital();
+    try { window.START_CAPITAL = START_CAPITAL; } catch {}
+
+    // (İlk event’lerde yeniden çizimi önlemek için) "son durum"u önceden oku
+    try {
+      const ot = await getJSON('/api/me/open-trades');
+      _lastOpenCount = Array.isArray(ot) ? ot.length : 0;
+    } catch {}
+    try {
+      const rt = await getJSON('/api/me/recent-trades?limit=200');
+      _lastRecentHash = _hashRecent(unwrap(rt));
+    } catch {}
+
+    await refresh();
+
+    // panel.js aktif sembolü ilk kez belirlediğinde: bakiyeyi tazele + grafiği yenile
+    document.addEventListener('sig:active-ready', async () => {
+      await initStartCapital();
+      await refresh();
+    });
+
+    // Açık pozisyon listesi değiştiğinde (sayı değişirse) yenile
+    document.addEventListener('sig:open-trades', (e) => {
+      const items = (e && e.detail && e.detail.items) || [];
+      const cnt = Array.isArray(items) ? items.length : 0;
+      if (_lastOpenCount !== cnt) {
+        _lastOpenCount = cnt;
+        refresh();
+      }
+    });
+
+    // Kapanan işlemler listesi değiştiğinde (hash değişirse) yenile
+    document.addEventListener('sig:recent-trades', (e) => {
+      const items = (e && e.detail && e.detail.items) || [];
+      const h = _hashRecent(items);
+      if (h !== _lastRecentHash) {
+        _lastRecentHash = h;
+        refresh();
+      }
+    });
+
+    const tip = (sel, t) => {
+      const el = document.querySelector(sel);
+      if (!el) return;
+      el.title = t; // metne
+      const card = el.closest('.kpi') || el.closest('.card') || el.parentElement;
+      if (card) card.title = t; // kutunun tamamına
+    };
+    tip('#stat-balance','Mevcut Bakiye (cüzdan: gerçek zaman)');
+    tip('#stat-net',    'Net Kâr (tüm yüklü işlemler)');
+    tip('#stat-win',    'Kazanma Oranı (tüm yüklü işlemler)');
+    tip('#stat-sharpe', 'Sharpe Oranı (tüm yüklü işlemlerin günlük getirileri)');
+    tip('#stat-mdd',    'Maksimum Düşüş (equity eğrisi, tüm yüklü veride)');
+    tip('#stat-cagr',   'Yıllık Getiri (tüm yüklü veride; ≥21 gün gerekiyorsa)');
+
   });
 })();

@@ -5,7 +5,9 @@
   const REFRESH_MS       = 5000;
   const OPEN_TRADES_MS   = 10000;
   const RECENT_TRADES_MS = 15000;
-  const RECENT_TRADES_LIMIT = 50; // (50 yerine 20 göster)
+  const RECENT_TRADES_LIMIT = 50;
+  const DEFAULT_SYMBOL = 'BTCUSDT';
+  let usedFallbackSymbol = false;
 
 // ==== helpers ====
   const $ = (sel) => document.querySelector(sel);
@@ -33,52 +35,104 @@
     applyChartTheme(wantDark);
   });
 
+// --- tarih yardımcıları ---
+function parseTs(v){
+  if (v == null || v === '') return null;
+  if (typeof v === 'number') return v < 1e12 ? v * 1000 : v;   // saniye→ms
+  const s = String(v).trim();
 
-//// === MA overlay katmanları ===
-//const MA = {}; // { key: LineSeries }
-//
-//function ensureLine(key, color) {
-//  if (!MA[key]) {
-//    MA[key] = chart.addLineSeries({
-//      color,
-//      lineWidth: 2,
-//      priceScaleId: 'right',            // aynı pencerede overlay
-//      lastValueVisible: true,
-//      crosshairMarkerVisible: true,
-//    });
-//  }
-//  return MA[key];
-//}
+  // "YYYY-MM-DD HH:MM:SS" → UTC kabul et
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2})$/);
+  if (m) return Date.parse(`${m[1]}T${m[2]}Z`);
+
+  // 10/13 haneli epoch
+  if (/^\d{10}$/.test(s)) return Number(s) * 1000;
+  if (/^\d{13}$/.test(s)) return Number(s);
+
+  // Diğer ISO tarihleri
+  const d = new Date(s);
+  return isNaN(d) ? null : d.getTime();
+}
+
+// Kapanış zamanını seç (önce 'timestamp', sonra diğerleri)
+function pickTradeCloseTs(t){
+  const keys = [
+    'timestamp',          // DB kapaniş saati (öncelik)
+    'closed_at','exit_at','exit_time','closedAt',
+    'executed_at','time'  // alternatif alanlar
+  ];
+  for (const k of keys){
+    const ts = parseTs(t?.[k]);
+    if (ts) return ts;
+  }
+  return Date.now();
+}
+
+function ensureDefaultNoticeEl() {
+  let el = document.getElementById('default-note');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'default-note';
+    el.className = 'chip bg-sky-50 border border-sky-200 text-sky-700 ' +
+                   'dark:bg-sky-500/15 dark:border-sky-300/40 dark:text-sky-200 hidden';
+    // Feed durum çipinin yakınına koy (yoksa chart üstüne)
+    const anchor = document.getElementById('feed-status') || document.getElementById('chart');
+    (anchor?.parentElement || document.body).insertBefore(el, anchor || null);
+  }
+  return el;
+}
+
+function showDefaultNotice(sym) {
+  const el = ensureDefaultNoticeEl();
+  el.textContent =  `Henüz sinyal yok`; // `Henüz sinyal yok: ${sym}`;
+  el.classList.remove('hidden');
+}
+function hideDefaultNotice() {
+  const el = document.getElementById('default-note');
+  if (el) el.classList.add('hidden');
+}
+
 
 // === MA overlay katmanları ===
 const MA = {}; // { key: LineSeries }
 
-// MA renkleri (dark & light için iki palet)
-const MA_COLORS = (dark) => ({
-  SMA20:  dark ? '#38bdf8' : '#0284c7', // sky
-  SMA50:  dark ? '#a78bfa' : '#7c3aed', // violet
-  EMA100: dark ? '#f59e0b' : '#b45309', // amber (kullanırsan)
-});
+const PALETTE = {
+  dark:  ['#38bdf8', '#a78bfa', '#f59e0b', '#34d399', '#f472b6'],
+  light: ['#0284c7', '#7c3aed', '#b45309', '#059669', '#db2777'],
+};
+const MA_COLOR_BY_KEY = {}; // { 'SMA7': '#...', ... }
 
-function ensureLine(key) {
-  const color = (MA_COLORS(isDark())[key]) || '#60a5fa';
+// Renk indeksini cache'le: tema değişse de aynı sıradaki renk eşlensin
+const MA_COLOR_IDX = {}; // { 'SMA7': 0, 'EMA99': 2, ... }
+function pickColor(key, idx, dark) {
+  const pal = dark ? PALETTE.dark : PALETTE.light;
+  const i = (MA_COLOR_IDX[key] ??= idx % pal.length);
+  return pal[i];
+}
+
+function ensureLine(key, idx) {
+  const color = pickColor(key, idx, isDark());
   if (!MA[key]) {
     MA[key] = chart.addLineSeries({
       color,
-      lineWidth: 2.5,
+      lineWidth: 1.2,
       priceScaleId: 'right',
-      lastValueVisible: false,
+      lastValueVisible: false,      // değer etiketi yok
+      priceLineVisible: false,      // ← MA’larda track price kapalı
       crosshairMarkerVisible: true,
     });
   } else {
-    MA[key].applyOptions({ color });
+    MA[key].applyOptions({ color, priceLineVisible: false });
   }
   return MA[key];
 }
 
 function recolorMAs(dark) {
-  const pal = MA_COLORS(dark);
-  Object.keys(MA).forEach(k => MA[k]?.applyOptions({ color: pal[k] || '#60a5fa' }));
+  const keys = Object.keys(MA);
+  keys.forEach((k, i) => {
+    const c = pickColor(k, i, dark);  // cache’i günceller
+    MA[k]?.applyOptions({ color: c });
+  });
 }
 
 // Basit hareketli ortalama
@@ -119,23 +173,21 @@ function buildMAData(klSeries, arrValues) {
   return arrValues.map((v, i) => (v == null ? null : { time: times[i], value: v })).filter(Boolean);
 }
 
-// Dışarıdan çağır: örn. updateMAOverlays(series, { sma: [20], ema: [50] })
 function updateMAOverlays(klSeries, config = { sma: [20], ema: [] }) {
   const closes = klSeries.map(b => b.close);
-
-  (config.sma || []).forEach(p => {
-    const data = buildMAData(klSeries, sma(closes, p));
-    ensureLine(`SMA${p}`).setData(data);
-  });
-
-  (config.ema || []).forEach(p => {
-    const data = buildMAData(klSeries, ema(closes, p));
-    ensureLine(`EMA${p}`).setData(data);
+  const keys = [
+    ...(config.sma || []).map(p => `SMA${p}`),
+    ...(config.ema || []).map(p => `EMA${p}`),
+  ];
+  keys.forEach((key, idx) => {
+    const p = Number(key.replace(/^\D+/,''));
+    const arr = key.startsWith('SMA') ? sma(closes, p) : ema(closes, p);
+    ensureLine(key, idx).setData(buildMAData(klSeries, arr));
   });
 }
 
 // Varsayılan katmanlar (istediğin gibi değiştir)
-const MA_CONFIG = { sma: [20, 50], ema: [] }; // SMA20 mavi-yeşil ton, SMA50 mor ton
+const MA_CONFIG = { sma: [7, 25], ema: [99] }; // SMA20 mavi-yeşil ton, SMA50 mor ton
 // Gizlemek istenirse:
 // MA['SMA20']?.setData([]);  MA['EMA50']?.setData([]);
 
@@ -169,9 +221,12 @@ const MA_CONFIG = { sma: [20, 50], ema: [] }; // SMA20 mavi-yeşil ton, SMA50 mo
       },
     });
     candle = chart.addCandlestickSeries({
-      upColor: '#16a34a', downColor: '#dc2626',
-      wickUpColor: '#16a34a', wickDownColor: '#dc2626',
-      borderVisible: false, priceLineVisible: false,
+      upColor: '#16a34a',
+      downColor: '#dc2626',
+      wickUpColor: '#16a34a',
+      wickDownColor: '#dc2626',
+      borderVisible: false,
+      priceLineVisible: true,
     });
     applyChartTheme(isDark());
     new ResizeObserver(() => chart?.timeScale().fitContent()).observe(chartEl);
@@ -263,8 +318,45 @@ const MA_CONFIG = { sma: [20, 50], ema: [] }; // SMA20 mavi-yeşil ton, SMA50 mo
   let klTimes = [];            // seri bar zamanları (s)
   let klGridTimes = [];        // ilk→son bar arası TF adımlı grid
 
-
   const TF_SEC = { '1m':60, '5m':300, '15m':900, '1h':3600, '4h':14400, '1d':86400 };
+
+async function bootstrapActiveSymbol() {
+  // 1) Açık pozisyonlardan seç
+  try {
+    const r = await fetch('/api/me/open-trades', { credentials: 'include', headers: { 'Accept': 'application/json' } });
+    if (r.ok) {
+      const items = await r.json();
+      if (Array.isArray(items) && items.length) {
+        const sym = String(items[0]?.symbol || '').toUpperCase();
+        if (sym) { activeSymbol = sym; return sym; }
+      }
+    }
+  } catch {}
+  // 2) Son işlemden seç
+  try {
+    const r2 = await fetch('/api/me/recent-trades?limit=1', { credentials: 'include', headers: { 'Accept': 'application/json' } });
+    if (r2.ok) {
+      const arr = await r2.json();
+      const t = Array.isArray(arr) ? arr[0] : (arr && arr[0]);
+      const sym = t?.symbol ? String(t.symbol).toUpperCase() : '';
+      if (sym) { activeSymbol = sym; return sym; }
+    }
+  } catch {}
+  // 3) UI seçicisinden (yoksa geçici)
+  const el = document.querySelector('[data-symbol-picker]');
+  activeSymbol = (el?.value ? String(el.value).toUpperCase() : '');
+
+    if (!activeSymbol) {
+      activeSymbol = DEFAULT_SYMBOL;
+      usedFallbackSymbol = true;
+      updateSymbolLabel(activeSymbol);
+      showDefaultNotice(activeSymbol);
+      // tooltip: çip üzerine sembol bilgisini koy
+      const note = document.getElementById('default-note');
+      if (note) note.title = `Öntanımlı sembol: ${activeSymbol}`;
+    }
+  return activeSymbol;
+ }
 
   // Verilen ts (s/ms) → grafiğin bar grid'ine snap (<= ts olan en yakın bar başlangıcı)
   function snapToSeries(ts){
@@ -296,17 +388,23 @@ const MA_CONFIG = { sma: [20, 50], ema: [] }; // SMA20 mavi-yeşil ton, SMA50 mo
     return sign + nf2.format(Math.abs(n));
   };
   // ISO string timezone içermiyorsa UTC varsay; yerel + UTC beraber göster
+  // * ISO string timezone içermiyorsa UTC varsay; borsa tarafında TEK saat: UTC
   const parseIsoAsUtc = (s) => {
     if (!s) return null;
     const hasTZ = /[zZ]|[+-]\d{2}:\d{2}$/.test(s);
     return new Date(hasTZ ? s : s + 'Z');
   };
+
+  // * Borsa tarafı: her zaman UTC göster
   const fmtDateLocalPlusUTC = (iso) => {
     if (!iso) return '—';
     const d = parseIsoAsUtc(iso);
-    const local = d.toLocaleString(LOCALE);
-    // const utc   = new Intl.DateTimeFormat(LOCALE, { timeZone: 'UTC', dateStyle: 'short', timeStyle: 'medium' }).format(d);
-    return `${local}`; // · ${utc} UTC`;
+    const utc = new Intl.DateTimeFormat(LOCALE, {
+      timeZone: 'UTC',
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit'
+    }).format(d);
+    return `${utc} UTC`;
   };
 
   // Kısa, yerel tarih (saniyesiz; "GG.AA SS:DD")
@@ -316,9 +414,19 @@ const MA_CONFIG = { sma: [20, 50], ema: [] }; // SMA20 mavi-yeşil ton, SMA50 mo
     const d = new Date(ms);
     return d.toLocaleString(LOCALE, { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' });
   };
+
   // ==== market verisi ====
   async function loadKlines({ symbol = activeSymbol, tf = klTf, limit = klLimit } = {}) {
-    try {
+   try {
+     // Boş sembolde API'yi hiç çağırma → 422 spam durur
+     if (!symbol) {
+       const fs = document.getElementById('feed-status');
+       if (fs) {
+         fs.textContent = 'Bağlantı: beklemede';
+         fs.className = 'chip bg-slate-100 dark:bg-slate-800/60';
+        }
+        return [];
+      }
       if (!candle) return []; // grafik kurulmadıysa sessizce çık
       const r = await fetch(`/api/market/klines?symbol=${symbol}&tf=${tf}&limit=${limit}`, { headers: { 'Accept': 'application/json' } });
       if (!r.ok) throw new Error('no api');
@@ -376,14 +484,19 @@ const MA_CONFIG = { sma: [20, 50], ema: [] }; // SMA20 mavi-yeşil ton, SMA50 mo
     }
   }
 
-
-  function fmtDateUTC(ts) {
-    const d = new Date(Number(ts));
-    const p = n => String(n).padStart(2, '0');
-    return `${p(d.getUTCDate())}.${p(d.getUTCMonth()+1)}.${d.getUTCFullYear()} `
-         + `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())} UTC`;
-  }
-
+// * Borsa tarafı: her zaman UTC göster (ISO ya da epoch kabul et)
+const fmtDateUTC = (ts) => {
+  if (ts == null) return '—';
+  const ms = (typeof ts === 'number') ? ts : parseTs(ts); // ISO → ms
+  const d  = new Date(ms);
+  const yyyy = String(d.getUTCFullYear());
+  const mm   = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const dd   = String(d.getUTCDate()).padStart(2, '0');
+  const hh   = String(d.getUTCHours()).padStart(2, '0');
+  const mi   = String(d.getUTCMinutes()).padStart(2, '0');
+  const ss   = String(d.getUTCSeconds()).padStart(2, '0');
+  return `${dd}.${mm}.${yyyy} ${hh}:${mi}:${ss} UTC`;
+};
 
   // ==== son sinyal hangi sembolde? ====
   async function getLatestMarkerSymbol() {
@@ -417,15 +530,19 @@ const MA_CONFIG = { sma: [20, 50], ema: [] }; // SMA20 mavi-yeşil ton, SMA50 mo
     _autoSwitchLock = true;
     try {
       const latestSym = await getLatestMarkerSymbol();
-      if (latestSym && latestSym !== activeSymbol) {
-        // Sadece state ve etiketi güncelle; fetch işlemi caller döngüde yapılır
-        activeSymbol = latestSym;
-        updateSymbolLabel(activeSymbol);
+
+      if (latestSym) {
+        // Sembol değişmişse güncelle; DEĞİŞMEDİYSE de canlı open var demektir → çipi gizle
+        if (latestSym !== activeSymbol) {
+          activeSymbol = latestSym;
+          updateSymbolLabel(activeSymbol);
+        }
+        usedFallbackSymbol = false;
+        hideDefaultNotice();
         if (DEBUG) console.debug('[auto-switch] activeSymbol ->', latestSym);
       }
     } finally { _autoSwitchLock = false; }
   }
-
 
 // ==== markers ====
 async function loadMarkers({ symbols = [], since = null } = {}) {
@@ -468,6 +585,12 @@ async function loadMarkers({ symbols = [], since = null } = {}) {
       // (birden fazla canlı open varsa, sonuncusu üstüne yazar; sorun değil)
     }
 
+    // Canlı OPEN bulunduysa fallback mesajını gizle
+    if (liveOpen) {
+      usedFallbackSymbol = false;
+      hideDefaultNotice();
+    }
+
     // Sadece tek bir işaret: CANLI yön oku (son bar üstünde)
     let markers = [];
     if (liveOpen && typeof seriesLastTime === 'number') {
@@ -492,31 +615,49 @@ async function loadMarkers({ symbols = [], since = null } = {}) {
 if (DEBUG) window.loadMarkers = loadMarkers;
 
 
-  // ==== açık pozisyonlar (tüm semboller) ====
+  // ==== Açık pozisyonlar ====
   async function loadOpenTrades() {
     try {
       const res = await fetch(`/api/me/open-trades`, { credentials: 'include' });
       if (!res.ok) throw new Error('api');
       const items = await res.json();
+     // Equity modülüne haber ver
+     try { document.dispatchEvent(new CustomEvent('sig:open-trades', { detail: { items } })); } catch {}
+
       const el = document.querySelector('#open-positions');
       if (!el) return items;
+
       if (!Array.isArray(items) || items.length === 0) { el.textContent = '—'; return []; }
-      const rows = items.map(t => {
-        const ts = fmtDateLocalPlusUTC(t.timestamp);
-        return `
-          <div class="grid grid-cols-6 gap-2 py-1 border-b border-slate-200/40 dark:border-slate-700/40">
-            <div class="col-span-2 font-medium">${t.symbol}</div>
-            <div class="${t.side === 'long' ? 'text-emerald-500' : 'text-rose-400'}">${t.side.toUpperCase()}</div>
-            <div>EP: ${fmtNum(t.entry_price)}</div>
-            <div>Lev: ${t.leverage}x</div>
-            <div class="text-xs text-slate-500">${ts}</div>
-          </div>`;
-      }).join('');
-      el.innerHTML = `
-        <div class="text-xs text-slate-500 mb-1 grid grid-cols-6 gap-2">
-          <div class="col-span-2">Sembol</div><div>Yön</div><div>Fiyat</div><div>Kald.</div><div>Tarih</div>
-        </div>
-        <div>${rows}</div>`;
+      // Güvenli DOM: header + satırlar
+      el.textContent = '';
+      const $div = (cls, text) => { const d=document.createElement('div'); if (cls) d.className=cls; if (text!=null) d.textContent=String(text); return d; };
+      const frag = document.createDocumentFragment();
+      // Header
+      const header = $div('text-xs text-slate-500 dark:text-slate-400 mb-1 grid grid-cols-6 gap-2');
+      header.append(
+        $div('col-span-2','Sembol'), $div('','Yön'), $div('','Fiyat'), $div('','Kaldıraç'), $div('','Tarih')
+      );
+      frag.append(header);
+      // Rows
+      const wrap = document.createElement('div');
+      items.forEach(t => {
+        const row = $div('grid grid-cols-6 gap-2 py-1 border-b border-slate-200/40 dark:border-slate-700/40');
+        const ts = fmtDateLocalPlusUTC(t.timestamp); // borsa tarafında tek saat (UTC formatlı)
+        // const ts = fmtDateLocalShort(t.timestamp);   // tarayıcı yerel saati
+        const side = String(t.side||'').toLowerCase();
+        const sideCls = side === 'long' ? 'text-emerald-500' : 'text-rose-400';
+        row.append(
+          $div('col-span-2 font-medium', t.symbol),
+          $div(sideCls, side.toUpperCase()),
+          $div('', fmtNum(t.entry_price)),
+          $div('', `${t.leverage}x`),
+          // $div('text-xs text-slate-500', ts)
+          $div('text-xs text-slate-500 whitespace-nowrap', fmtDateUTC(t.timestamp))
+        );
+        wrap.appendChild(row);
+      });
+      frag.append(wrap);
+      el.appendChild(frag);
       return items;
     } catch {
       const el = document.querySelector('#open-positions');
@@ -530,43 +671,47 @@ async function loadRecentTrades() {
     const res = await fetch(`/api/me/recent-trades?limit=${RECENT_TRADES_LIMIT}`, { credentials: 'include' });
     if (!res.ok) throw new Error('api');
     const items = await res.json();
+    // Equity modülüne haber ver
+    try { document.dispatchEvent(new CustomEvent('sig:recent-trades', { detail: { items } })); } catch {}
     const el = document.querySelector('#recent-trades');
     if (!el) return items;
 
-    if (!items || !items.length) {
-      el.innerHTML = '—';
-      return items;
-    }
-
-  const header = `
-    <div class="text-xs text-slate-500 dark:text-slate-400 mb-1 grid gap-2"
-         style="grid-template-columns:repeat(5,minmax(0,1fr))">
-        <div>Sembol</div>
-        <div>Yön</div>
-        <div>Giriş Fiyatı</div>
-        <div>Çıkış Fiyatı</div>
-        <div>PnL</div>
-      </div>`;
+    if (!items || !items.length) { el.textContent = '—'; return items; }
 
     const fmtMaybePrice = (v) => (v == null || v === '' ? '—' : nf2.format(Number(v)));
-    const rows = items.map(t => {
+
+    // Güvenli DOM: header + satırlar
+    el.textContent = '';
+    const $div = (cls, text) => { const d=document.createElement('div');
+    if (cls) d.className=cls;
+    if (text!=null) d.textContent=String(text); return d; };
+    const frag = document.createDocumentFragment();
+    // Header
+    const header = $div('text-xs text-slate-500 dark:text-slate-400 mb-1 grid gap-2');
+    header.style.gridTemplateColumns = 'repeat(5,minmax(0,1fr))';
+    header.append($div('','Sembol'), $div('','Yön'), $div('','Giriş Fiyatı'), $div('','Çıkış Fiyatı'), $div('','Tarih'));
+    frag.append(header);
+    // Rows
+    const wrap = document.createElement('div');
+    items.forEach(t => {
       const side = String(t.side || '').toUpperCase();
       const sideCls = side === 'LONG' ? 'text-emerald-500' : 'text-rose-400';
-      const pnl = Number(t.pnl ?? t.realized_pnl ?? 0);
-      const pnlCls = pnl >= 0 ? 'text-emerald-500' : 'text-rose-400';
-      const tsUTC = fmtDateUTC(t.closed_at ?? t.time ?? Date.now());
-      return `
-        <div class="grid gap-2 py-1 border-b border-slate-200/40 dark:border-slate-700/40"
-         style="grid-template-columns:repeat(5,minmax(0,1fr))">
-          <div class="font-medium" title="${tsUTC}">${t.symbol}</div>
-          <div class="${sideCls}">${side}</div>
-          <div>${fmtMaybePrice(t.entry_price)}</div>
-          <div>${fmtMaybePrice(t.exit_price)}</div>
-          <div class="${pnlCls}">${nf2.format(pnl)}</div>
-        </div>`;
-    }).join('');
-
-    el.innerHTML = header + `<div>${rows}</div>`;
+      const tsUTC = fmtDateUTC(pickTradeCloseTs(t));
+      const row = $div('grid gap-2 py-1 border-b border-slate-200/40 dark:border-slate-700/40');
+      row.style.gridTemplateColumns = 'repeat(5,minmax(0,1fr))';
+      const sym = $div('font-medium', t.symbol); sym.title = tsUTC;
+      row.append(
+        sym,
+        $div(sideCls, side),
+        $div('', fmtMaybePrice(t.entry_price)),
+        $div('', fmtMaybePrice(t.exit_price)),
+        // $div('text-xs text-slate-500', tsUTC),
+        $div('text-xs text-slate-500 whitespace-nowrap', tsUTC)
+      );
+      wrap.appendChild(row);
+    });
+    frag.append(wrap);
+    el.appendChild(frag);
     return items;
   } catch {
     const el = document.querySelector('#recent-trades');
@@ -587,6 +732,14 @@ async function loadRecentTrades() {
       setText('#kpi-dd', fmtPct(d.max_dd_30d));
       setText('#kpi-sharpe', d.sharpe_30d ?? '—');
       setText('#kpi-last', d.last_signal_at ? fmtDateLocalPlusUTC(d.last_signal_at) : '—');
+
+      const setTitle = (sel, t) => { const el = document.querySelector(sel); if (el) el.title = t; };
+      setTitle('#kpi-pnl',    'PnL (son 7 gün)');
+      setTitle('#kpi-win',    'Kazanma Oranı (son 30 gün)');
+      setTitle('#kpi-open',   'Şu anki açık pozisyon adedi');
+      setTitle('#kpi-dd',     'Maksimum Düşüş (son 30 gün, peak→trough)');
+      setTitle('#kpi-sharpe', 'Sharpe Oranı (son 30 gün, günlük getiriler)');
+      setTitle('#kpi-last',   'Son sinyal zamanı (UTC)');
     } catch {}
   }
 
@@ -637,38 +790,39 @@ async function loadRecentTrades() {
   highlightActiveTf(klTf);
   makeChart();
   (async () => {
-    const qp = new URLSearchParams(location.search);
+    // Öncelik: URL ?symbol= → açık poz./son işlem (bootstrapActiveSymbol) → canlı marker → bilinen liste → fallback
+    const qp    = new URLSearchParams(location.search);
     const fromUrl = qp.get('symbol');
     const known   = await loadSymbols();
+    const bootSym = await bootstrapActiveSymbol();     // /api/me/open-trades → /api/me/recent-trades → picker
+    const latest  = await getLatestMarkerSymbol();     // canlı marker varsa
+    let initial = (fromUrl && fromUrl.toUpperCase())
+               || bootSym
+               || latest
+               || (known[0] || '');                   // sabit yok; bilinen listeden ya da boş
+    activeSymbol = initial ? initial.toUpperCase() : '';
+    updateSymbolLabel(activeSymbol || '—');
+    // Hızlı Bakiye ilk çekimi için (activeSymbol hazır olduğunda) haber ver
+    document.dispatchEvent(new Event('sig:active-ready'));
+    if (usedFallbackSymbol) showDefaultNotice(activeSymbol);
 
-    let initial = (fromUrl && fromUrl.toUpperCase()) || known[0] || 'BTCUSDT';
-    if (!fromUrl) {
-      const latest = await getLatestMarkerSymbol();
-      if (latest) initial = latest;
-    }
-
-    activeSymbol = initial;
-    updateSymbolLabel(activeSymbol);
-
-    // await loadKlines({ symbol: activeSymbol });
-    // await loadMarkers({ symbols: [activeSymbol] });
     // İlk yüklemede de son işaretçiye senkron ol
     await autoSwitchSymbolIfNeeded();
     await loadKlines({ symbol: activeSymbol });
     await loadMarkers({ symbols: [activeSymbol] });
 
-
     loadOpenTrades();      // tüm semboller
     loadRecentTrades();    // tüm semboller
     loadOverview();
 
-    // periyodik
-    // setInterval(() => { loadKlines({ symbol: activeSymbol }); loadMarkers({ symbols: [activeSymbol] }); }, 30000);
-    // periyodik: HER turda önce auto-switch, sonra klines+markers
     setInterval(async () => {
-      // otomatik sembol geçişi kapalı
-      await loadKlines({ symbol: activeSymbol });
-      await loadMarkers({ symbols: [activeSymbol] });
+      if (!activeSymbol) {               // sembol yoksa API çağırma
+        await bootstrapActiveSymbol();   // arada bir yeniden deneyelim (hafif)
+        return;
+      }
+      await autoSwitchSymbolIfNeeded();  // varsa canlı open başka sembole kayar
+      await loadKlines({ symbol: activeSymbol, tf: klTf, limit: klLimit });
+      await loadMarkers();
     }, REFRESH_MS);
 
     setInterval(() => loadOpenTrades(),  OPEN_TRADES_MS);
@@ -680,6 +834,7 @@ async function loadRecentTrades() {
     // Kart yalnız Asil'de HTML'a basılıyor; bu yüzden sadece DOM varlığına bakmak yeterli.
     const elWallet = document.getElementById('qb-wallet');
     const elNet    = document.getElementById('qb-net');
+    const elUp     = document.getElementById('qb-upnl');
     const elOpen = document.getElementById('qb-open');
     const elLast = document.getElementById('qb-last');
     const btnRef = document.getElementById('qb-refresh');
@@ -687,9 +842,8 @@ async function loadRecentTrades() {
     const statusEl = document.getElementById('qb-status');
     if (!elNet || !elOpen || !elLast) return;
 
-    // --- status helper: tek yerden yönet ---
     let _qbHideTimer = null;
-    function showStatus(text, tone /* 'info'|'ok'|'err' */){
+    function showStatus(text, tone){
       if (!statusEl) return;
       // metin
       statusEl.textContent = text || '';
@@ -712,7 +866,6 @@ async function loadRecentTrades() {
         }, delay);
       }
     }
-
     const nf2 = new Intl.NumberFormat(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     const fmt2 = (v) => nf2.format(v || 0);
     const safeNum = (v) => {
@@ -728,14 +881,21 @@ async function loadRecentTrades() {
       0
     );
 
-    async function loadQuickBalance(){
+    async function loadQuickBalance(opts) {
+    const silent = !!(opts && opts.silent);
+    // Aktif sembol henüz belirlenmediyse ilk yüklemeyi beklet
+    if (!activeSymbol) return;
       try {
         // durum: yenileniyor
-        showStatus('Yenileniyor…','info');
-        // Başlangıç değerleri: boş kalmasın
-        elNet.textContent = '0'; elOpen.textContent = '0'; elLast.textContent = '—';
+        if (!silent) showStatus('Yenileniyor…','info');
+        // Başlangıç değerleri: boş kalmasın (yalnız manuelde göster)
+        if (!silent) {
+          elNet.textContent = '0'; elOpen.textContent = '0'; elLast.textContent = '—';
+          if (elUp) elUp.textContent = '—';
+        }
         // 1) Kapanan işlemler -> toplam net PnL ve son işlem
         let net = 0, lastText = '—';
+        let lastView = null; // {sym, side, sign, lpnl, ts, pnlCls}
         try {
           const r = await fetch('/api/me/recent-trades?limit=100', { credentials: 'include', headers:{'Accept':'application/json'} });
           if (r.ok) {
@@ -749,6 +909,11 @@ async function loadRecentTrades() {
               const sign = lpnl >= 0 ? '+' : '';
               // Tarih: kısa/yerel göster
               const ts   = fmtDateLocalShort(last?.timestamp);
+              const pnlCls = lpnl > 0 ? 'text-emerald-500'
+                             : (lpnl < 0 ? 'text-rose-400' : 'text-slate-400');
+              // dışarıda kullanmak için parçaları sakla
+              lastView = { sym, side, sign, lpnl, ts, pnlCls };
+              // fallback metin (veri yoksa kullanılacak)
               lastText = `${sym} ${side} · ${sign}${fmt2(lpnl)} · ${ts}`;
             }
           }
@@ -766,40 +931,95 @@ async function loadRecentTrades() {
 
         elNet.textContent  = (net === 0 ? '0' : (net > 0 ? '+' : '−') + fmt2(Math.abs(net)));
         elOpen.textContent = String(openCnt);
-        elLast.textContent = lastText;
+        // Canlı PnL (uPnL): SADECE açık pozisyon varsa çağır
+        if (elUp) {
+          if (openCnt > 0) {
+            let up = 0;
+            try {
+              const qs2 = new URLSearchParams({ symbol: String(activeSymbol).toUpperCase() });
+              const rU  = await fetch('/api/me/unrealized?' + qs2.toString(), {
+                credentials: 'include', headers: { 'Accept': 'application/json' }
+              });
+              if (rU.ok) {
+                const ju = await rU.json();
+                up = Number(ju?.unrealized ?? 0);
+              }
+            } catch {}
+            elUp.classList.remove('text-emerald-500','text-rose-400');
+            if (up > 0) elUp.classList.add('text-emerald-500');
+            else if (up < 0) elUp.classList.add('text-rose-400');
+            elUp.textContent = (up >= 0 ? '+' : '−') + nf2.format(Math.abs(up));
+          } else {
+            elUp.classList.remove('text-emerald-500','text-rose-400');
+            elUp.textContent = '—';
+          }
+        }
+        if (lastView) {
+          elLast.textContent = ''; // temizle
+          elLast.append(
+            document.createTextNode(`${lastView.sym} ${lastView.side} · `),
+            (() => {
+              const s = document.createElement('span');
+              s.className = lastView.pnlCls;
+              s.textContent = `${lastView.sign}${fmt2(lastView.lpnl)}`;
+              return s;
+            })(),
+            document.createTextNode(` · ${lastView.ts}`)
+          );
+        } else {
+          elLast.textContent = lastText; // '—' veya fallback metin
+        }
 
         // Net PnL Renk: + yeşil / - kırmızı
         elNet.classList.remove('text-emerald-500','text-rose-400');
         if (net > 0) elNet.classList.add('text-emerald-500');
         else if (net < 0) elNet.classList.add('text-rose-400');
 
-        // Cüzdan = START_CAPITAL + net
+        // Cüzdan: backend’den sembole göre (quote çıkarımı server’da)
         if (elWallet) {
-          const START_CAP = (typeof window.START_CAPITAL === 'number') ? window.START_CAPITAL : 1000;
-          const wallet = START_CAP + net;
-          elWallet.textContent = fmt2(wallet);
-          // Cüzdan rengi: başlangıç üstü/altı
-          elWallet.classList.remove('text-emerald-500','text-rose-400');
-          if (wallet > START_CAP) elWallet.classList.add('text-emerald-500');
-          else if (wallet < START_CAP) elWallet.classList.add('text-rose-400');
+          let shown = null;
+          try {
+            const qs = new URLSearchParams({ symbol: String(activeSymbol).toUpperCase() });
+            const r  = await fetch('/api/me/balance?' + qs.toString(), {
+              credentials: 'include', headers: { 'Accept': 'application/json' }
+            });
+            if (r.ok) {
+              const j = await r.json();
+              shown = Number(j?.available ?? j?.balance);
+            }
+          } catch {}
+          // Fallback: API başarısızsa eski simülasyon mantığını kullan
+          if (!Number.isFinite(shown)) {
+            const START_CAP = (typeof window.START_CAPITAL === 'number') ? window.START_CAPITAL : 1000;
+            shown = START_CAP + (Number(net) || 0);
+            // simüle modda renk: başlangıcın üstü/altı
+            elWallet.classList.remove('text-emerald-500','text-rose-400');
+            if (shown > START_CAP) elWallet.classList.add('text-emerald-500');
+            else if (shown < START_CAP) elWallet.classList.add('text-rose-400');
+          } else {
+            // gerçek bakiye → nötr renk
+            elWallet.classList.remove('text-emerald-500','text-rose-400');
+          }
+          elWallet.textContent = fmt2(shown || 0);
         }
         // a11y: güncellendi bilgisi
         if (a11y) a11y.textContent = 'Hızlı bakiye özeti güncellendi.';
         // durum: yenilendi (kısa süre göster)
-        showStatus('Yenilendi','ok');
+        if (!silent) showStatus('Yenilendi','ok');
       } catch {
         // sessiz
-        showStatus('Hata','err');
+        if (!silent) showStatus('Hata','err');
       }
     }
 
     btnRef?.addEventListener('click', (e) => {
       e.preventDefault();
       if (a11y) a11y.textContent = 'Yenileniyor…';
-      loadQuickBalance();
+      loadQuickBalance({ silent: false });  // manuel yenileme
     });
-    // ilk yükleme
-    loadQuickBalance();
+    // İlk yükleme: activeSymbol hazır değilse bekle
+    if (activeSymbol) loadQuickBalance({ silent: true });
+    else document.addEventListener('sig:active-ready', () => loadQuickBalance({ silent: true }), { once: true });
   })();
 
   // ==== Referans Kodu Modalı (frontend) ====

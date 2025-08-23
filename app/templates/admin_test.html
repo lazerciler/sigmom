@@ -44,7 +44,6 @@
           <label>Exchange</label>
           <select id="exchange">
             <option value="binance_futures_testnet" selected>binance_futures_testnet</option>
-            <!-- gelecekte mainnet / diğer borsalar buraya eklenir -->
           </select>
           <div class="hint small">Şablonu test etmek için testnet kullanıyoruz.</div>
         </div>
@@ -97,17 +96,34 @@
       <div class="grid g3" style="margin-top:12px">
         <div>
           <label>Entry Price (ops.)</label>
-          <input id="entry_price" type="number" step="0.01" />
+          <input id="entry_price" type="number" step="0.01" value="1"/>
         </div>
         <div>
           <label>Exit Price (ops.)</label>
-          <input id="exit_price" type="number" step="0.01" />
+          <input id="exit_price" type="number" step="0.01" value="1"/>
         </div>
         <div>
-          <label>Timestamp (UTC ISO)</label>
+          <label>Timestamp (ISO)</label>
           <input id="timestamp" type="text" />
           <div class="hint small">Şimdiki zaman için “Now”’a bas.</div>
         </div>
+      </div>
+
+      <div style="margin:6px 0 10px" class="row">
+        <strong>Zaman Modu:</strong>
+        <label class="radio" style="margin-left:6px">
+          <input type="radio" name="tzmode" id="tzLocal" value="local" checked>
+          Local (Bölgesel zaman)
+        </label>
+        <label class="radio" style="margin-left:12px">
+          <input type="radio" name="tzmode" id="tzUTC" value="utc">
+          UTC (Greenwich)
+        </label>
+
+        <label class="radio" style="margin-left:18px">
+          <input type="checkbox" id="sendUtc" checked>
+          Gönderirken UTC'ye çevir
+        </label>
       </div>
 
       <div class="actions" style="margin-top:14px">
@@ -119,10 +135,19 @@
     </div>
 
     <div class="card">
-      <div class="row" style="justify-content:space-between">
+      <div class="row" style="justify-content:space-between; align-items:center;">
         <div><strong>Gönderilen Payload</strong></div>
         <div class="small hint">Order idempotency server’da uygulanır (newClientOrderId).</div>
       </div>
+
+      <div class="row" style="margin:8px 0;">
+        <label class="radio"><input type="checkbox" id="rawMode"> Raw JSON düzenle</label>
+        <button id="btnFormat" type="button" class="ghost">Format</button>
+        <span id="rawStatus" class="small hint"></span>
+      </div>
+      <textarea id="rawPayload" rows="12" spellcheck="false" style="width:100%;display:none;font-family:ui-monospace,Consolas,monospace;"></textarea>
+
+      <div style="height:6px"></div>
       <pre id="payloadOut">{}</pre>
       <div style="height:6px"></div>
       <div><strong>Yanıt</strong> <span id="respBadge" class="pill">–</span></div>
@@ -130,6 +155,6 @@
     </div>
   </div>
 
-<script src="{{ url_for('static', path='js/admin_test.js') }}?v=20250819a" defer></script>
+<script src="{{ url_for('static', path='js/admin_test.js') }}?v=20250821e" defer></script>
 </body>
 </html>
