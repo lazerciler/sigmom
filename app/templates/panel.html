@@ -8,8 +8,6 @@
   <script src="{{ url_for('static', path='js/panel_head.js') }}?v=4c"></script>
   <!-- Tailwind -->
   <link rel="stylesheet" href="{{ url_for('static', path='css/tw.css') }}?v=4c">
-  <!-- Small style touches -->
-  <link rel="stylesheet" href="{{ url_for('static', path='css/panel_extras.css') }}?v=1c">
 </head>
 
 <body class="bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-100">
@@ -110,8 +108,9 @@
             </p>
             <p id="guest-tip" class="mt-2 text-slate-500 dark:text-slate-300 text-sm">
               <a href="/auth/google/login"
-                 class="!text-emerald-400 hover:!text-emerald-300 visited:!text-emerald-400
-                        underline decoration-emerald-400/70 hover:decoration-emerald-300
+                 class="!text-emerald-700 hover:!text-emerald-600 visited:!text-emerald-700
+                        dark:!text-emerald-400 dark:hover:!text-emerald-300 dark:visited:!text-emerald-400
+                        no-underline hover:no-underline
                         underline-offset-4 transition-colors cursor-pointer">
                 Google hesabınız ile giriş yaparak standart özelliklerden ücretsiz yararlanabilirsiniz.
               </a>
@@ -175,11 +174,11 @@
     <section id="sec-trades"
            class="grid grid-cols-1 lg:grid-cols-2 gap-6 {% if not user %}hidden{% endif %}">
 
-      <div class="card shadow-sm p-4"><h3 class="text-sm font-semibold mb-3">Açılan Emirler (Borsa tarafı)</h3>
+      <div class="card shadow-sm p-4"><h2 class="text-sm font-semibold mb-3">Açılan Emirler (Borsa tarafı)</h2>
         <div id="open-positions"
              class="text-sm text-slate-500 h-14 overflow-auto overscroll-contain pr-1">—</div></div>
 
-      <div class="card shadow-sm p-4"><h3 class="text-sm font-semibold mb-3">Kapanan Emirler. (Borsa tarafı)</h3>
+      <div class="card shadow-sm p-4"><h2 class="text-sm font-semibold mb-3">Kapanan Emirler. (Borsa tarafı)</h2>
         <div id="recent-trades"
              class="text-sm text-slate-500 h-14 overflow-auto overscroll-contain pr-1">—</div></div>
 
@@ -224,18 +223,12 @@
   <!-- Lightweight Charts -->
   <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js" defer></script>
 
-  <!-- Chart.js -->
-<!--  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>-->
-<!--  <script src="https://cdn.jsdelivr.net/npm/moment"></script>-->
-<!--  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment"></script>-->
-
   {% if referral_verified %}
   <!-- Chart.js (yalnız referansı doğrulanmış kullanıcılar için) -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/moment"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment"></script>
   {% endif %}
-
 
   <!-- Panel / Panel JS -->
   <script src="{{ url_for('static', path='js/panel.js') }}?v=20250822fa" defer></script>
@@ -265,25 +258,35 @@
     <span class="text-rose-700 bg-rose-50 border-rose-200 dark:text-rose-200 dark:bg-rose-500/20 dark:border-rose-300/40"></span>
   </div>
 
-    <footer class="mt-10">
-      <div class="h-px bg-slate-800/60"></div>
-      <div class="max-w-6xl mx-auto px-4">
-        <div class="py-3 text-[12.5px] text-center text-slate-500">
-          © <span id="ft-year-b"></span> Sigmom SAI —
-          <a href="/legal/terms" class="text-emerald-400 hover:text-emerald-300 underline underline-offset-4">Kullanım Şartları</a>
-          <span class="mx-1 text-slate-600">·</span>
-          <a href="/legal/privacy" class="text-emerald-400 hover:text-emerald-300 underline underline-offset-4">Gizlilik</a>
-        </div>
-        <p class="text-emerald-600 hover:text-emerald-500 dark:text-emerald-400 dark:hover:text-emerald-300
-          underline decoration-emerald-600/70 dark:decoration-emerald-400/70 hover:decoration-emerald-500
-          underline-offset-4 transition-colors">
-          Google ile Giriş, Google LLC tarafından sağlanır.
-          <a target="_blank" rel="noopener" href="https://policies.google.com/terms" class="hover:text-slate-400">Şartlar</a> ·
-          <a target="_blank" rel="noopener" href="https://policies.google.com/privacy" class="hover:text-slate-400">Gizlilik</a>
-        </p>
+<footer class="mt-12 pt-8">
+  <div class="max-w-7xl mx-auto px-4 lg:px-6">
+    <div class="text-center space-y-3">
+      <div class="text-sm text-slate-600 dark:text-slate-400">
+        © <span id="ft-year-b"></span> Sigmom SAI —
+        <a href="/legal/terms" class="text-slate-700 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white underline underline-offset-2 transition-colors">
+          Kullanım Şartları
+        </a>
+        <span class="mx-1.5 text-slate-400">·</span>
+        <a href="/legal/privacy" class="text-slate-700 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white underline underline-offset-2 transition-colors">
+          Gizlilik
+        </a>
       </div>
-    </footer>
-    <script>try{document.getElementById('ft-year-b').textContent=new Date().getFullYear()}catch{}</script>
+      <p class="text-xs text-slate-500 dark:text-slate-500 leading-relaxed">
+        Google ile Giriş, Google LLC tarafından sağlanır.
+        <a target="_blank" rel="noopener" href="https://policies.google.com/terms"
+           class="text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-300 underline underline-offset-2 transition-colors">
+          Şartlar
+        </a>
+        <span class="mx-1 text-slate-400">·</span>
+        <a target="_blank" rel="noopener" href="https://policies.google.com/privacy"
+           class="text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-300 underline underline-offset-2 transition-colors">
+          Gizlilik
+        </a>
+      </p>
+    </div>
+  </div>
+</footer>
+
 
   </main>
 </body>

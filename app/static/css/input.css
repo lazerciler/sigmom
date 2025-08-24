@@ -1,13 +1,72 @@
-@import "tailwindcss";
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
-/* .dark sınıfı altında çalışan dark varyantını etkinleştir */
-@custom-variant dark (&:where(.dark &));
+@layer components {
+  /* Chip */
+  .chip {
+    @apply inline-flex items-center h-7 px-2.5 rounded-full text-xs border border-slate-300/60 dark:border-slate-600;
+  }
 
-@source "../../templates/**/*.html";
-@source "../js/**/*.js";
+  /* Card */
+  .card {
+    @apply border border-slate-200 rounded-2xl bg-white dark:border-slate-700 dark:bg-slate-800 p-4;
+  }
 
-/* ↓ mevcut base kuralların */
-@layer base {
-  button, [role="button"], a { @apply cursor-pointer; }
-  :disabled { @apply cursor-not-allowed; }
+  /* KPI */
+  .kpi {
+    @apply border border-slate-200 rounded-2xl p-3 bg-white dark:border-slate-700 dark:bg-slate-800;
+  }
+  .kpi h6 {
+    @apply text-xs tracking-wide uppercase text-slate-500 dark:text-slate-400;
+  }
+  .kpi div {
+    @apply font-semibold mt-1.5 text-slate-900 dark:text-white;
+  }
+
+  /* ÖZEL SCROLLBAR STILLERİ */
+  #recent-trades, #open-positions {
+    max-height: 16rem;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(100,116,139,.55) transparent;
+  }
+
+  .dark #recent-trades, .dark #open-positions {
+    scrollbar-color: rgba(148,163,184,.55) transparent;
+  }
+
+  #recent-trades::-webkit-scrollbar, #open-positions::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  #recent-trades::-webkit-scrollbar-track, #open-positions::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  #recent-trades::-webkit-scrollbar-thumb, #open-positions::-webkit-scrollbar-thumb {
+    background-color: rgba(100,116,139,.55);
+    border-radius: 8px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+
+  .dark #recent-trades::-webkit-scrollbar-thumb,
+  .dark #open-positions::-webkit-scrollbar-thumb {
+    background-color: rgba(148,163,184,.55);
+  }
+
+  #recent-trades:hover::-webkit-scrollbar-thumb,
+  #open-positions:hover::-webkit-scrollbar-thumb {
+    background-color: rgba(100,116,139,.70);
+  }
+
+  .dark #recent-trades:hover::-webkit-scrollbar-thumb,
+  .dark #open-positions:hover::-webkit-scrollbar-thumb {
+    background-color: rgba(148,163,184,.70);
+  }
 }

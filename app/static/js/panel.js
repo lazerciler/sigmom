@@ -231,8 +231,8 @@ const MA_CONFIG = { sma: [7, 25], ema: [99] }; // SMA20 mavi-yeşil ton, SMA50 m
     applyChartTheme(isDark());
     new ResizeObserver(() => chart?.timeScale().fitContent()).observe(chartEl);
     // chart kurulumu tamamlanınca
-    ensureJumpBtn();
-    chart.timeScale().subscribeVisibleTimeRangeChange(updateJumpBtnVisibility);
+    // ensureJumpBtn();
+    // chart.timeScale().subscribeVisibleTimeRangeChange(updateJumpBtnVisibility);
   }
 
   function applyChartTheme(dark) {
@@ -255,59 +255,59 @@ const MA_CONFIG = { sma: [7, 25], ema: [99] }; // SMA20 mavi-yeşil ton, SMA50 m
     recolorMAs(dark);
   }
 
-  // ==== "En son çubuğa kaydır" butonu ====
-  let _jumpBtn = null;
-  function ensureJumpBtn() {
-    if (_jumpBtn || !chartEl) return _jumpBtn;
-    _jumpBtn = document.createElement('button');
-    _jumpBtn.id = 'jump-latest';
-    _jumpBtn.type = 'button';
-
-    // Sağ altta
-    _jumpBtn.className =
-      'hidden absolute right-3 bottom-3 z-10 ' +
-      'h-8 w-8 grid place-items-center rounded-md ' +
-      'bg-slate-700/80 text-white hover:bg-slate-600 ' +
-      'shadow-md focus:outline-none focus:ring-2 focus:ring-sky-500';
-    _jumpBtn.innerHTML = '<span aria-hidden="true" class="text-lg">→</span>';
-    _jumpBtn.title = 'En son çubuğa kaydır (Alt+Shift+→)';
-    _jumpBtn.setAttribute('aria-label', 'En son çubuğa kaydır');
-    _jumpBtn.addEventListener('click', () => jumpToLatest());
-    // overlay için
-    const s = getComputedStyle(chartEl);
-    if (s.position === 'static') chartEl.style.position = 'relative';
-    chartEl.appendChild(_jumpBtn);
-    return _jumpBtn;
-  }
-  function updateJumpBtnVisibility() {
-    const btn = ensureJumpBtn();
-    if (!btn || !chart || !seriesLastTime) return;
-    try {
-      const r = chart.timeScale().getVisibleRange();
-      // Son bar eşiği: aktif TF’e göre yarım bar payı bırak.
-      const barSec = (TF_SEC[klTf] || 900);
-      const pad = 0.5 * barSec;
-      const show = !!(r && typeof r.to === 'number' && r.to < (seriesLastTime - pad));
-      btn.classList.toggle('hidden', !show);
-    } catch {}
-  }
-
-  function jumpToLatest() {
-    if (!chart) return;
-    chart.timeScale().scrollToRealTime();
-    // Gerçek son bara kilitle ve görünürlüğü güncelle
-    chart.timeScale().applyOptions({ rightOffset: 0 });
-    chart.timeScale().scrollToRealTime();
-    updateJumpBtnVisibility();
-  }
-
-  // Kısayol: Alt+Shift+Sağ ok
-  window.addEventListener('keydown', (e) => {
-    if (e.altKey && e.shiftKey && (e.key === 'ArrowRight' || e.code === 'ArrowRight')) {
-      e.preventDefault();
-      jumpToLatest();
-    }
-  });
+//  // ==== "En son çubuğa kaydır" butonu ====
+//  let _jumpBtn = null;
+//  function ensureJumpBtn() {
+//    if (_jumpBtn || !chartEl) return _jumpBtn;
+//    _jumpBtn = document.createElement('button');
+//    _jumpBtn.id = 'jump-latest';
+//    _jumpBtn.type = 'button';
+//
+//    // Sağ altta
+//    _jumpBtn.className =
+//      'hidden absolute right-3 bottom-3 z-10 ' +
+//      'h-8 w-8 grid place-items-center rounded-md ' +
+//      'bg-slate-700/80 text-white hover:bg-slate-600 ' +
+//      'shadow-md focus:outline-none focus:ring-2 focus:ring-sky-500';
+//    _jumpBtn.innerHTML = '<span aria-hidden="true" class="text-lg">→</span>';
+//    _jumpBtn.title = 'En son çubuğa kaydır (Alt+Shift+→)';
+//    _jumpBtn.setAttribute('aria-label', 'En son çubuğa kaydır');
+//    _jumpBtn.addEventListener('click', () => jumpToLatest());
+//    // overlay için
+//    const s = getComputedStyle(chartEl);
+//    if (s.position === 'static') chartEl.style.position = 'relative';
+//    chartEl.appendChild(_jumpBtn);
+//    return _jumpBtn;
+//  }
+//  function updateJumpBtnVisibility() {
+//    const btn = ensureJumpBtn();
+//    if (!btn || !chart || !seriesLastTime) return;
+//    try {
+//      const r = chart.timeScale().getVisibleRange();
+//      // Son bar eşiği: aktif TF’e göre yarım bar payı bırak.
+//      const barSec = (TF_SEC[klTf] || 900);
+//      const pad = 0.5 * barSec;
+//      const show = !!(r && typeof r.to === 'number' && r.to < (seriesLastTime - pad));
+//      btn.classList.toggle('hidden', !show);
+//    } catch {}
+//  }
+//
+//  function jumpToLatest() {
+//    if (!chart) return;
+//    chart.timeScale().scrollToRealTime();
+//    // Gerçek son bara kilitle ve görünürlüğü güncelle
+//    chart.timeScale().applyOptions({ rightOffset: 0 });
+//    chart.timeScale().scrollToRealTime();
+//    updateJumpBtnVisibility();
+//  }
+//
+//  // Kısayol: Alt+Shift+Sağ ok
+//  window.addEventListener('keydown', (e) => {
+//    if (e.altKey && e.shiftKey && (e.key === 'ArrowRight' || e.code === 'ArrowRight')) {
+//      e.preventDefault();
+//      jumpToLatest();
+//    }
+//  });
 
   // ==== global durum ====
   let klTf = '15m';
@@ -615,57 +615,133 @@ async function loadMarkers({ symbols = [], since = null } = {}) {
 if (DEBUG) window.loadMarkers = loadMarkers;
 
 
-  // ==== Açık pozisyonlar ====
-  async function loadOpenTrades() {
+//  // ==== Açık pozisyonlar ====
+//  async function loadOpenTrades() {
+//    try {
+//      const res = await fetch(`/api/me/open-trades`, { credentials: 'include' });
+//      if (!res.ok) throw new Error('api');
+//      const items = await res.json();
+//     // Equity modülüne haber ver
+//     try { document.dispatchEvent(new CustomEvent('sig:open-trades', { detail: { items } })); } catch {}
+//
+//      const el = document.querySelector('#open-positions');
+//      if (!el) return items;
+//
+//      if (!Array.isArray(items) || items.length === 0) { el.textContent = '—'; return []; }
+//      // Güvenli DOM: header + satırlar
+//      el.textContent = '';
+//      const $div = (cls, text) => { const d=document.createElement('div'); if (cls) d.className=cls; if (text!=null) d.textContent=String(text); return d; };
+//      const frag = document.createDocumentFragment();
+//      // Header
+//      const header = $div('text-xs text-slate-500 dark:text-slate-400 mb-1 grid grid-cols-6 gap-2');
+//      header.append(
+//        $div('col-span-2','Sembol'), $div('','Yön'), $div('','Fiyat'), $div('','Kaldıraç'), $div('','Tarih')
+//      );
+//      frag.append(header);
+//      // Rows
+//      const wrap = document.createElement('div');
+//      items.forEach(t => {
+//        const row = $div('grid grid-cols-6 gap-2 py-1 border-b border-slate-200/40 dark:border-slate-700/40');
+//        const ts = fmtDateLocalPlusUTC(t.timestamp); // borsa tarafında tek saat (UTC formatlı)
+//        // const ts = fmtDateLocalShort(t.timestamp);   // tarayıcı yerel saati
+//        const side = String(t.side||'').toLowerCase();
+//        const sideCls = side === 'long' ? 'text-emerald-500' : 'text-rose-400';
+//        row.append(
+//          $div('col-span-2 font-medium', t.symbol),
+//          $div(sideCls, side.toUpperCase()),
+//          $div('', fmtNum(t.entry_price)),
+//          $div('', `${t.leverage}x`),
+//          // $div('text-xs text-slate-500', ts)
+//          $div('text-xs text-slate-500 whitespace-nowrap', fmtDateUTC(t.timestamp))
+//        );
+//        wrap.appendChild(row);
+//      });
+//      frag.append(wrap);
+//      el.appendChild(frag);
+//      return items;
+//    } catch {
+//      const el = document.querySelector('#open-positions');
+//      if (el) el.textContent = '—';
+//      return [];
+//    }
+//  }
+
+// ==== Açık pozisyonlar ====
+async function loadOpenTrades() {
+  try {
+    const res = await fetch(`/api/me/open-trades`, { credentials: 'include' });
+    if (!res.ok) throw new Error('api');
+    const items = await res.json();
+
+    // Equity modülüne haber ver
     try {
-      const res = await fetch(`/api/me/open-trades`, { credentials: 'include' });
-      if (!res.ok) throw new Error('api');
-      const items = await res.json();
-     // Equity modülüne haber ver
-     try { document.dispatchEvent(new CustomEvent('sig:open-trades', { detail: { items } })); } catch {}
+      document.dispatchEvent(new CustomEvent('sig:open-trades', { detail: { items } }));
+    } catch {}
 
-      const el = document.querySelector('#open-positions');
-      if (!el) return items;
+    const el = document.querySelector('#open-positions');
+    if (!el) return items;
 
-      if (!Array.isArray(items) || items.length === 0) { el.textContent = '—'; return []; }
-      // Güvenli DOM: header + satırlar
-      el.textContent = '';
-      const $div = (cls, text) => { const d=document.createElement('div'); if (cls) d.className=cls; if (text!=null) d.textContent=String(text); return d; };
-      const frag = document.createDocumentFragment();
-      // Header
-      const header = $div('text-xs text-slate-500 dark:text-slate-400 mb-1 grid grid-cols-6 gap-2');
-      header.append(
-        $div('col-span-2','Sembol'), $div('','Yön'), $div('','Fiyat'), $div('','Kaldıraç'), $div('','Tarih')
-      );
-      frag.append(header);
-      // Rows
-      const wrap = document.createElement('div');
-      items.forEach(t => {
-        const row = $div('grid grid-cols-6 gap-2 py-1 border-b border-slate-200/40 dark:border-slate-700/40');
-        const ts = fmtDateLocalPlusUTC(t.timestamp); // borsa tarafında tek saat (UTC formatlı)
-        // const ts = fmtDateLocalShort(t.timestamp);   // tarayıcı yerel saati
-        const side = String(t.side||'').toLowerCase();
-        const sideCls = side === 'long' ? 'text-emerald-500' : 'text-rose-400';
-        row.append(
-          $div('col-span-2 font-medium', t.symbol),
-          $div(sideCls, side.toUpperCase()),
-          $div('', fmtNum(t.entry_price)),
-          $div('', `${t.leverage}x`),
-          // $div('text-xs text-slate-500', ts)
-          $div('text-xs text-slate-500 whitespace-nowrap', fmtDateUTC(t.timestamp))
-        );
-        wrap.appendChild(row);
-      });
-      frag.append(wrap);
-      el.appendChild(frag);
-      return items;
-    } catch {
-      const el = document.querySelector('#open-positions');
-      if (el) el.textContent = '—';
+    if (!Array.isArray(items) || items.length === 0) {
+      el.textContent = '—';
       return [];
     }
-  }
 
+    // Güvenli DOM: header + satırlar
+    el.textContent = '';
+    const $div = (cls, text) => {
+      const d = document.createElement('div');
+      if (cls) d.className = cls;
+      if (text != null) d.textContent = String(text);
+      return d;
+    };
+    const frag = document.createDocumentFragment();
+
+    // Header — sağ tablo ile aynı kolon düzeni
+    const header = $div('text-xs text-slate-500 dark:text-slate-400 mb-1 grid gap-2');
+    header.style.gridTemplateColumns = 'repeat(5,minmax(0,1fr))';
+    header.append(
+      $div('', 'Sembol'),
+      $div('', 'Yön'),
+      $div('', 'Fiyat'),
+      $div('', 'Kaldıraç'),
+      $div('', 'Tarih')
+    );
+    frag.append(header);
+
+    // Rows — sağ tablo ile hizalı
+    const wrap = document.createElement('div');
+    items.forEach(t => {
+      const row = $div('grid gap-2 py-1 border-b border-slate-200/40 dark:border-slate-700/40');
+      row.style.gridTemplateColumns = 'repeat(5,minmax(0,1fr))';
+
+      const side = String(t.side || '').toUpperCase();
+      const sideCls = side === 'LONG' ? 'text-emerald-500' : 'text-rose-400';
+
+      row.append(
+        $div('font-medium', t.symbol),
+        $div(sideCls, side),
+        $div('', fmtNum(t.entry_price)),
+        $div('', `${t.leverage}x`),
+        // Sağ tabloyla aynı: nowrap tarih (ellipsis/truncate yok)
+        $div('text-xs text-slate-500 whitespace-nowrap', fmtDateUTC(t.timestamp))
+      );
+
+      wrap.appendChild(row);
+    });
+
+    frag.append(wrap);
+    el.appendChild(frag);
+    return items;
+  } catch {
+    const el = document.querySelector('#open-positions');
+    if (el) el.textContent = '—';
+    return [];
+  }
+}
+
+
+
+// ==== Kapanan pozisyonlar ====
 async function loadRecentTrades() {
   try {
     const res = await fetch(`/api/me/recent-trades?limit=${RECENT_TRADES_LIMIT}`, { credentials: 'include' });

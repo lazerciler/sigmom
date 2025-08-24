@@ -50,4 +50,5 @@ backups/
 .env.*
 
 ### Project-specific
-tailwindcss.exe
+#tailwindcss.exe
+*.exe

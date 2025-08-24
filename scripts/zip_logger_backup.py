@@ -30,7 +30,18 @@ BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 SKELETONS_DIR.mkdir(parents=True, exist_ok=True)
 
 # === Include / Exclude Rules ===
-INCLUDE_EXTENSIONS = {".py", ".sql", ".txt", ".md", ".example", ".ini", ".mako"}
+INCLUDE_EXTENSIONS = {
+    ".py",
+    ".sql",
+    ".js",
+    ".css",
+    ".img",
+    ".txt",
+    ".md",
+    ".example",
+    ".ini",
+    ".mako",
+}
 
 EXCLUDE_DIRS = {
     "__pycache__",

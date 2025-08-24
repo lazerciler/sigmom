@@ -13,6 +13,7 @@
 ├── requirements-dev.txt
 ├── requirements.txt
 ├── tailwind.config.js
+├── tailwindcss-v4.exe
 ├── tailwindcss.exe
 ├── .github/
 │   └── workflows/
@@ -60,7 +61,6 @@
 │   │   ├── favicon.ico
 │   │   ├── css/
 │   │   │   ├── input.css
-│   │   │   ├── panel_extras.css
 │   │   │   └── tw.css
 │   │   ├── img/
 │   │   │   └── logo.svg

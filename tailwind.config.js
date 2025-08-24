@@ -1,31 +1,36 @@
 // tailwind.config.js
-/** @type {import('tailwindcss').Config} */
-
-// tailwind.config.js
 module.exports = {
+  darkMode: 'class',
   content: [
-    "./templates/**/*.html",
-    "./app/static/js/**/*.js",      // JS içinde ürettiğimiz markup
-    "./app/**/*.py"                 // (Jinja/Starlette kullanıyorsan faydalı)
+    "./app/templates/**/*.html",
+    "./app/static/js/**/*.js"
   ],
-  theme: { extend: {} },
+  theme: {
+    extend: {
+      maxWidth: {
+        '8xl': '90rem',
+        '9xl': '96rem'
+      }
+    }
+  },
   plugins: [],
-  safelist: [
-    'grid-cols-5',
-    // ileride gerekirse:
-    'grid-cols-6'
-    // veya pattern kullan:
-    // { pattern: /grid-cols-(5|6)/ }
-  ]
-};
-
-
+}
+//// tailwind.config.js
 //module.exports = {
-//  darkMode: 'class',                       // ← kritik
+//  darkMode: 'class',
 //  content: [
-//    './app/templates/**/*.html',
-//    './app/static/js/**/*.js',
+//    "./app/templates/**/*.html",
+//    "./app/static/js/**/*.js"
 //  ],
-//  theme: { extend: {} },
+//  theme:
+//    { extend: {} },
+//  },
 //  plugins: [],
-//};
+//  safelist: [
+//    'grid-cols-5',
+//    // ileride gerekirse:
+//    'grid-cols-6'
+//    // veya pattern kullan:
+//    // { pattern: /grid-cols-(5|6)/ }
+//  ]
+//}
