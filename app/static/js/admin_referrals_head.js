@@ -4,13 +4,7 @@
   var t = localStorage.getItem('theme');
   var prefersDark = false;
   try { prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches; } catch(_) {}
-//  if (t === 'dark' || (!t && prefersDark)) {
-//    document.documentElement.classList.add('dark');
-//  } else {
-//    document.documentElement.classList.remove('dark');
-//  }
 
-  // 2) Tailwind CDN global 'tailwind.config' bekler ⇒ global objeyi GARANTİ ET
   var tw = (window.tailwind = window.tailwind || {});
   tw.config = { darkMode: 'class' };
 

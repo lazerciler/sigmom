@@ -1,13 +1,15 @@
 <!doctype html>
-<html lang="tr"  class="dark">
+<html lang="tr" class="dark">
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>SIGMOM • Panel</title>
   <!-- Dark mode ve Tailwind config -->
-  <script src="{{ url_for('static', path='js/panel_head.js') }}?v=4c"></script>
+  <script src="{{ url_for('static', path='js/panel_head.js') }}?v=4g"></script>
   <!-- Tailwind -->
-  <link rel="stylesheet" href="{{ url_for('static', path='css/tw.css') }}?v=4c">
+  <link rel="stylesheet" href="{{ url_for('static', path='css/tw.css') }}?v=4f">
+  <!-- Extras -->
+  <link rel="stylesheet" href="{{ url_for('static', path='css/panel_extras.css') }}?v=1c">
 </head>
 
 <body class="bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-100">
@@ -126,7 +128,7 @@
             <h4 class="text-sm font-semibold mb-2">📝 Hızlı Bakiye Özeti</h4>
             <ul id="qb-list" class="text-sm grid grid-cols-1 gap-y-1">
               <li class="flex items-center justify-between">
-                <span>Serbest Bakiye (Cüzdan)</span><span id="qb-wallet">—</span>
+                <span>Cüzdan Bakiyesi (Kullanılabilir)</span><span id="qb-wallet">—</span>
               </li>
               <li class="flex items-center justify-between">
                 <span>Net PnL</span><span id="qb-net">—</span>

@@ -1,36 +1,20 @@
-// tailwind.config.js
+/** @type {import('tailwindcss').Config} */
 module.exports = {
   darkMode: 'class',
   content: [
-    "./app/templates/**/*.html",
-    "./app/static/js/**/*.js"
+    './app/templates/**/*.{html,htm,jinja}',   // Jinja/HTML şablonların
+    './app/static/js/**/*.{js,ts}',            // panel.js, panel_equity.js vs.
+    './**/*.py',                               // Jinja sınıf literal'ları Python içinde olabilir
   ],
   theme: {
-    extend: {
-      maxWidth: {
-        '8xl': '90rem',
-        '9xl': '96rem'
-      }
-    }
+    extend: {},
   },
   plugins: [],
+  safelist: [
+    // JS ile runtime eklediğin tonlar/renkler (panel.js’de kullanılıyor)
+    { pattern: /(text|bg|border)-(slate|emerald|amber|indigo|sky|rose)-(50|100|200|300|400|500|600|700|800|900)/ },
+    { pattern: /(dark:)?(text|bg|border)-(slate|emerald|amber|indigo|sky|rose)-(50|100|200|300|400|500|600|700|800|900)/ },
+    // Chip/durum/utility varyasyonları
+    { pattern: /(opacity|w|h|px|py|mx|my)-\d+/ },
+  ],
 }
-//// tailwind.config.js
-//module.exports = {
-//  darkMode: 'class',
-//  content: [
-//    "./app/templates/**/*.html",
-//    "./app/static/js/**/*.js"
-//  ],
-//  theme:
-//    { extend: {} },
-//  },
-//  plugins: [],
-//  safelist: [
-//    'grid-cols-5',
-//    // ileride gerekirse:
-//    'grid-cols-6'
-//    // veya pattern kullan:
-//    // { pattern: /grid-cols-(5|6)/ }
-//  ]
-//}

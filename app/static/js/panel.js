@@ -9,6 +9,49 @@
   const DEFAULT_SYMBOL = 'BTCUSDT';
   let usedFallbackSymbol = false;
 
+
+  // ==== Veri tazelik göstergesi ("Veri durumu") ====
+  // Son başarılı kline çağrısı zamanı ve son hata zamanı (ms)
+  let lastApiOkAt  = 0;
+  let lastApiErrAt = 0;
+  // Eşikler (REFRESH_MS’e göre): canlı / gecikmeli / eskimiş
+  const FRESH_AGE_MS = REFRESH_MS * 2;     // ~10 sn
+  const LAGGY_AGE_MS = REFRESH_MS * 6;     // ~30 sn
+  const STALE_AGE_MS = REFRESH_MS * 24;    // ~2 dk
+
+  function setFeedChip(text, tone) {
+    const el = document.getElementById('feed-status');
+    if (!el) return;
+    el.textContent = `Veri: ${text}`;
+    let cls = 'chip bg-slate-100 dark:bg-slate-800/60';
+    if (tone === 'ok') {
+      cls = 'chip bg-emerald-50 dark:bg-emerald-900/20 border-emerald-300/50 text-emerald-700 dark:text-emerald-300';
+    } else if (tone === 'warn') {
+      cls = 'chip bg-amber-50 dark:bg-amber-900/20 border-amber-300/50 text-amber-700 dark:text-amber-300';
+    } else if (tone === 'err') {
+      cls = 'chip bg-rose-50 dark:bg-rose-500/20 border-rose-200 text-rose-700 dark:text-rose-200';
+    }
+    el.className = cls;
+  }
+  function updateFeedStatus() {
+    const now = Date.now();
+    if (!lastApiOkAt && !lastApiErrAt) {
+      setFeedChip('bekleniyor', ''); return;
+    }
+    // Başarılı son çağrıdan bu yana geçen süreye göre ton seç
+    const age = now - lastApiOkAt;
+    if (lastApiOkAt && age <= FRESH_AGE_MS) {
+      setFeedChip('kararlı', 'ok');
+    } else if (lastApiOkAt && age <= LAGGY_AGE_MS) {
+      setFeedChip('gecikmeli', 'warn');
+    } else if (lastApiOkAt && age <= STALE_AGE_MS) {
+      setFeedChip('eskimiş', '');
+    } else {
+      setFeedChip('kopuk', 'err');
+    }
+  }
+
+
 // ==== helpers ====
   const $ = (sel) => document.querySelector(sel);
   const isDark = () => document.documentElement.classList.contains('dark');
@@ -416,15 +459,26 @@ async function bootstrapActiveSymbol() {
   };
 
   // ==== market verisi ====
+//  async function loadKlines({ symbol = activeSymbol, tf = klTf, limit = klLimit } = {}) {
+//   try {
+//     // Boş sembolde API'yi hiç çağırma → 422 spam durur
+//     if (!symbol) {
+//       const fs = document.getElementById('feed-status');
+//       if (fs) {
+//         fs.textContent = 'Bağlantı: beklemede';
+//         fs.className = 'chip bg-slate-100 dark:bg-slate-800/60';
+//        }
+//        lastApiOkAt = 0; lastApiErrAt = 0;
+//        updateFeedStatus();
+//        return [];
+//      }
   async function loadKlines({ symbol = activeSymbol, tf = klTf, limit = klLimit } = {}) {
-   try {
-     // Boş sembolde API'yi hiç çağırma → 422 spam durur
-     if (!symbol) {
-       const fs = document.getElementById('feed-status');
-       if (fs) {
-         fs.textContent = 'Bağlantı: beklemede';
-         fs.className = 'chip bg-slate-100 dark:bg-slate-800/60';
-        }
+    try {
+      // Boş sembolde API'yi hiç çağırma → 422 spam’ı durdur
+      if (!symbol) {
+        lastApiOkAt = 0;
+        lastApiErrAt = 0;
+        updateFeedStatus();
         return [];
       }
       if (!candle) return []; // grafik kurulmadıysa sessizce çık
@@ -474,15 +528,25 @@ async function bootstrapActiveSymbol() {
         seriesLastTime = lastTime;
         updateJumpBtnVisibility();
       }
-      const fs = document.getElementById('feed-status');
-      if (fs) { fs.textContent = 'Bağlantı: açık'; fs.className = 'chip bg-emerald-50 dark:bg-emerald-900/20 border-emerald-300/50 text-emerald-700 dark:text-emerald-300'; }
+//      const fs = document.getElementById('feed-status');
+//      if (fs) { fs.textContent = 'Bağlantı: açık'; fs.className = 'chip bg-emerald-50 dark:bg-emerald-900/20 border-emerald-300/50 text-emerald-700 dark:text-emerald-300'; }
+      // Başarılı okuma → "Veri durumu" güncelle
+      lastApiOkAt = Date.now();
+      updateFeedStatus();
       return series;
+//    } catch {
+//      const fs = document.getElementById('feed-status');
+//      if (fs) { fs.textContent = 'Bağlantı: kapalı'; fs.className = 'chip bg-slate-100 dark:bg-slate-800/60'; }
     } catch {
-      const fs = document.getElementById('feed-status');
-      if (fs) { fs.textContent = 'Bağlantı: kapalı'; fs.className = 'chip bg-slate-100 dark:bg-slate-800/60'; }
+      // Hata → son hata zamanını kaydet; çip periyodik olarak bayatlayacak
+      lastApiErrAt = Date.now();
+      updateFeedStatus();
       return [];
     }
   }
+
+  // Jump butonu devre dışıyken referans hatasını önlemek için no-op
+  function updateJumpBtnVisibility() {}
 
 // * Borsa tarafı: her zaman UTC göster (ISO ya da epoch kabul et)
 const fmtDateUTC = (ts) => {
@@ -613,58 +677,6 @@ async function loadMarkers({ symbols = [], since = null } = {}) {
   }
 }
 if (DEBUG) window.loadMarkers = loadMarkers;
-
-
-//  // ==== Açık pozisyonlar ====
-//  async function loadOpenTrades() {
-//    try {
-//      const res = await fetch(`/api/me/open-trades`, { credentials: 'include' });
-//      if (!res.ok) throw new Error('api');
-//      const items = await res.json();
-//     // Equity modülüne haber ver
-//     try { document.dispatchEvent(new CustomEvent('sig:open-trades', { detail: { items } })); } catch {}
-//
-//      const el = document.querySelector('#open-positions');
-//      if (!el) return items;
-//
-//      if (!Array.isArray(items) || items.length === 0) { el.textContent = '—'; return []; }
-//      // Güvenli DOM: header + satırlar
-//      el.textContent = '';
-//      const $div = (cls, text) => { const d=document.createElement('div'); if (cls) d.className=cls; if (text!=null) d.textContent=String(text); return d; };
-//      const frag = document.createDocumentFragment();
-//      // Header
-//      const header = $div('text-xs text-slate-500 dark:text-slate-400 mb-1 grid grid-cols-6 gap-2');
-//      header.append(
-//        $div('col-span-2','Sembol'), $div('','Yön'), $div('','Fiyat'), $div('','Kaldıraç'), $div('','Tarih')
-//      );
-//      frag.append(header);
-//      // Rows
-//      const wrap = document.createElement('div');
-//      items.forEach(t => {
-//        const row = $div('grid grid-cols-6 gap-2 py-1 border-b border-slate-200/40 dark:border-slate-700/40');
-//        const ts = fmtDateLocalPlusUTC(t.timestamp); // borsa tarafında tek saat (UTC formatlı)
-//        // const ts = fmtDateLocalShort(t.timestamp);   // tarayıcı yerel saati
-//        const side = String(t.side||'').toLowerCase();
-//        const sideCls = side === 'long' ? 'text-emerald-500' : 'text-rose-400';
-//        row.append(
-//          $div('col-span-2 font-medium', t.symbol),
-//          $div(sideCls, side.toUpperCase()),
-//          $div('', fmtNum(t.entry_price)),
-//          $div('', `${t.leverage}x`),
-//          // $div('text-xs text-slate-500', ts)
-//          $div('text-xs text-slate-500 whitespace-nowrap', fmtDateUTC(t.timestamp))
-//        );
-//        wrap.appendChild(row);
-//      });
-//      frag.append(wrap);
-//      el.appendChild(frag);
-//      return items;
-//    } catch {
-//      const el = document.querySelector('#open-positions');
-//      if (el) el.textContent = '—';
-//      return [];
-//    }
-//  }
 
 // ==== Açık pozisyonlar ====
 async function loadOpenTrades() {
@@ -900,6 +912,10 @@ async function loadRecentTrades() {
       await loadKlines({ symbol: activeSymbol, tf: klTf, limit: klLimit });
       await loadMarkers();
     }, REFRESH_MS);
+    // Veri çipini her saniye yeniden değerlendir (API çağrısı olmasa da)
+    setInterval(updateFeedStatus, 1000);
+    // İlk durum
+    updateFeedStatus();
 
     setInterval(() => loadOpenTrades(),  OPEN_TRADES_MS);
     setInterval(() => loadRecentTrades(), RECENT_TRADES_MS);
