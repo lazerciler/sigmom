@@ -41,9 +41,13 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
         await db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
 
-    # Raw sinyali kaydet
+    # Raw sinyali kaydet ve hemen commit et
     raw_signal = await insert_raw_signal(db, signal_data)
+    await db.commit()
     logger.info("The received raw signal was recorded.")
+
+    # Sonraki işlemler için yeni bir transaction başlat
+    await db.begin()
 
     # OPEN
     if signal_data.mode == "open":
