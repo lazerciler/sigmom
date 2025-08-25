@@ -16,6 +16,7 @@ Projeyi klonlayın:
 git clone https://github.com/lazerciler/sigmom.git
 
 pip install -r requirements.txt
+```
 
 ## Yapılandırma
 
