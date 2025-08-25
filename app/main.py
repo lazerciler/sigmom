@@ -30,15 +30,17 @@ from app.routers import market
 from app.services.referral_maintenance import cleanup_expired_reserved
 
 
-REQUIRED_PYTHON = (3, 9)
-if (
-    sys.version_info[:2] != REQUIRED_PYTHON
-):  # Sadece major.minor versiyonunu kontrol eder (3.9.x)
-    sys.exit(
-        f"Bu uygulama sadece Python {REQUIRED_PYTHON[0]}.{REQUIRED_PYTHON[1]} ile çalışır.\n"
-        f"Kullandığınız versiyon: {sys.version.split()[0]}\n"
-        f"Lütfen Python 3.9 kurunuz."
-    )
+# REQUIRED_PYTHON = (3, 9)
+# if (
+#     sys.version_info[:2] != REQUIRED_PYTHON
+# ):  # Sadece major.minor versiyonunu kontrol eder (3.9.x)
+#     sys.exit(
+#         f"Bu uygulama sadece Python {REQUIRED_PYTHON[0]}.{REQUIRED_PYTHON[1]} ile çalışır.\n"
+#         f"Kullandığınız versiyon: {sys.version.split()[0]}\n"
+#         f"Lütfen Python 3.9 kurunuz."
+#     )
+if sys.version_info < (3, 9):
+    sys.exit(f"Bu uygulama Python 3.9+ gerektirir. Bulundu: {sys.version.split()[0]}")
 
 # Logger ayarları
 logging.basicConfig(level=logging.INFO)
@@ -156,5 +158,7 @@ async def startup_event():
 
 if __name__ == "__main__":
     import uvicorn
+
+    https_only = True
 
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)

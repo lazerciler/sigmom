@@ -90,7 +90,7 @@ async def verify_referral(
                     continue
                 if bcrypt.checkpw(raw, chash.encode("utf-8")):
                     match_id = rid
-                    print("verify matched id:", match_id)  # --- GEÇİCİ TEŞHİS ---
+                    # print("verify matched id:", match_id)  # --- GEÇİCİ TEŞHİS ---
                     break
 
             if not match_id:
