@@ -17,6 +17,18 @@ git clone https://github.com/lazerciler/sigmom.git
 
 pip install -r requirements.txt
 
-Kullanım
+## Yapılandırma
+
+Oturum verilerini güvenle imzalamak için güçlü bir gizli anahtar gereklidir.
+`.env` dosyanıza veya ortamınıza aşağıdaki değişkeni ekleyin:
+
+```bash
+SESSION_SECRET=<uzun-rastgele-dizge>
+```
+
+Bu değer boş bırakılırsa uygulama çalışmayı reddeder.
+
+## Kullanım
+
 Ana Python dosyasını çalıştırarak sinyal ve uyarı arayüzünü başlatabilirsiniz.
 Daha fazla bilgi için kod ve dosya yapısını inceleyin.
