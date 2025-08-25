@@ -34,6 +34,7 @@ INCLUDE_EXTENSIONS = {
     ".py",
     ".sql",
     ".js",
+    ".html",
     ".css",
     ".img",
     ".txt",
