@@ -64,6 +64,7 @@ EXCLUDE_PATTERNS = [
     "-legacy",
     ".tmp",
     ".bak",
+    ".diff",
     "~$",
     ".log",
     ".pyc",
