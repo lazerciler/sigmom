@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # app/config.py
 # Python 3.9
-from pydantic import BaseSettings, Field, root_validator
+from pydantic import BaseSettings, Field, root_validator, validator
 from typing import List
 
 
@@ -48,7 +48,13 @@ class Settings(BaseSettings):
     ADMIN_EMAILS: str = Field("", env="ADMIN_EMAILS")
 
     # Session Secret
-    SESSION_SECRET: str = Field("dev-secret-change-me", env="SESSION_SECRET")
+    SESSION_SECRET: str = Field(..., env="SESSION_SECRET")
+
+    @validator("SESSION_SECRET")
+    def validate_session_secret(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("SESSION_SECRET must be set and not empty")
+        return v
 
     @property
     def active_exchanges(self) -> List[str]:
