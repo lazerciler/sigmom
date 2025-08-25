@@ -38,6 +38,7 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
         execution = load_execution_module(signal_data.exchange)
     except Exception as e:
         logger.exception("Exchange module failed to load")
+        await db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
 
     # Raw sinyali kaydet
@@ -68,6 +69,7 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
             )
             if not order_result.get("success"):
                 logger.error("OPEN order failed: %s", order_result)
+                await db.rollback()
                 return {
                     "success": False,
                     "message": f"Opening order failed: {order_result.get('message', 'Unknown error')}",
@@ -92,6 +94,7 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
 
         except Exception as e:
             logger.exception("OPEN operation failed: %s", e)
+            await db.rollback()
             return {"success": False, "message": f"OPEN error: {e}"}
 
     # CLOSE
@@ -111,6 +114,7 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
             logger.error(
                 "[CLOSE] No matching open position found (if there is no public id, the last open record is checked)."
             )
+            await db.rollback()
             return {
                 "success": False,
                 "message": "No open positions were found to be closed.",
@@ -123,6 +127,7 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
         )
         if not order_result.get("success"):
             logger.error("[CLOSE] Order failed: %s", order_result)
+            await db.rollback()
             return {
                 "success": False,
                 "message": f"Close order failed: {order_result.get('message', 'Unknown error')}",
@@ -134,6 +139,7 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
             position = await execution.order_handler.get_position(signal_data.symbol)
         except Exception as e:
             logger.warning("[CLOSE] get_position exception: %s", e)
+            await db.rollback()
             position = None
 
         def _amt(pos: Optional[Dict]) -> Decimal:
