@@ -181,6 +181,12 @@ dialog#ref-modal::backdrop { background: rgba(0,0,0,0.5); }
   border:6px solid transparent; border-top-color:rgba(30,41,59,.92);
 }
 
+.tooltip > .circle-icon .tooltiptext[data-pos="below"]::after{
+  border-top-color: transparent;
+  border-bottom-color: rgba(30,41,59,.92);
+  top: calc(var(--tt-arrow-y, 0px) - 12px);
+}
+
 /* Aç/kapa */
 .tooltip > .circle-icon[data-open="1"] .tooltiptext{ display:block; }
 
