@@ -4,18 +4,17 @@
       data-equity-allowed="{{ (referral_verified | default(false)) | tojson }}">
 <head>
   <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+<!--  <meta name="viewport" content="width=device-width,initial-scale=1"/>-->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
   <title>Sigmom • SAI Panel</title>
   <!-- Theme Boot -->
   <script src="{{ url_for('static', path='js/theme_boot.js') }}?v=1a"></script>
   <!-- Tailwind -->
   <link rel="stylesheet" href="{{ url_for('static', path='css/tw.css') }}?v=4f">
   <!-- Extras -->
-  <link rel="stylesheet" href="{{ url_for('static', path='css/panel_extras.css') }}?v=1c">
+  <link rel="stylesheet" href="{{ url_for('static', path='css/panel_extras.css') }}?v=1d">
 </head>
-
 <body class="bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-100">
-
   <!-- Üst bar -->
   <header class="sticky top-0 z-40 backdrop-blur border-b border-slate-200/60 dark:border-slate-800/80 bg-white/70 dark:bg-slate-900/60">
     <div class="max-w-7xl mx-auto px-4 lg:px-6 h-14 flex items-center justify-between">
@@ -25,28 +24,21 @@
       </div>
 
       <div class="flex items-center gap-3">
-
         <!-- Tema butonu -->
-        <!--
-        <button data-theme-data-theme-toggle toggle id="themeToggle"
-                class="h-8 w-8 rounded-lg border border-slate-300 dark:border-slate-600">🌓</button>
-        -->
-
         <button id="themeToggle" type="button"
                 class="h-8 w-8 rounded-lg border border-slate-300 dark:border-slate-600 grid place-items-center"
                 aria-label="Tema değiştir"
                 title="Tema değiştir 🌓">
             🌓
         </button>
-
-{% if user and user.role == 'admin' %}
-<a href="/admin/settings" target="_blank" rel="noopener"
-   class="h-8 w-8 rounded-lg border border-slate-300 dark:border-slate-600 grid place-items-center"
-   aria-label="Yönetici ayarları"
-   title="Yönetici ayarları ⚙">
-  ⚙
-</a>
-{% endif %}
+        {% if user and user.role == 'admin' %}
+        <a href="/admin/settings" target="_blank" rel="noopener"
+           class="h-8 w-8 rounded-lg border border-slate-300 dark:border-slate-600 grid place-items-center"
+           aria-label="Yönetici ayarları"
+           title="Yönetici ayarları ⚙">
+          ⚙
+        </a>
+        {% endif %}
 
         {% if user %}
           {% if referral_verified %}
@@ -93,7 +85,7 @@
           </div>
           <div id="chart" class="h-[380px] sm:h-[440px] min-h-[260px]"></div>
           <div id="data-disclaimer" class="px-4 py-2 text-[11px] text-slate-500 dark:text-slate-400 border-t border-slate-200 dark:border-slate-700">
-          {{ 'Veriler gecikmelidir; **bu bir hata değil, gürültü filitreleme ve grafik stabilizasyonu içindir.**' if referral_verified and user else
+          {{ 'Veriler gecikmelidir; **bu bir hata değil, gürültü filtreleme ve grafik stabilizasyonu içindir.**' if referral_verified and user else
             'Veriler gecikmelidir; **grafik referans amaçlı olup yatırım tavsiyesi değildir.**' }}
           </div>
         </div>
@@ -115,7 +107,7 @@
             <dt class="col-span-1 text-slate-500">Erişim</dt>
             <dd id="access-level" class="col-span-2 text-right">{% if user and referral_verified %}
               Tüm özellikler {% elif user %}
-              Stantart özellikler{% else %}
+              Standart özellikler{% else %}
               Misafir{% endif %}</dd>
             <dt class="col-span-1 text-slate-500">Referans</dt>
                <dd class="col-span-2 text-right">{% if referral_verified %}
@@ -144,7 +136,6 @@
               {{ 'Eğer bir referans kodunuz varsa aşağıya girerek onaylayın.
               Şu anda tüm referans kontenjanı doludur: İleri bir tarihte yeni bir kontenjan açılabilir.' if user and not referral_verified else
               'Şu anda tüm referans kontenjanı doludur: İleri bir tarihte yeni bir kontenjan açılabilir.' }}
-
             </p>
             <p class="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
               <a href="#" class="!text-emerald-700 hover:!text-emerald-600 visited:!text-emerald-700
@@ -152,14 +143,13 @@
                         no-underline hover:no-underline underline-offset-4 transition-colors cursor-pointer">
                 {{ '' if user else '' }}</a><!-- Referansınız yoksa ön kayıt için sıraya girebilirsiniz. -->
               </p>
-
           {% if not user %}
             <p id="guest-tip" class="mt-2 text-slate-500 dark:text-slate-300 text-sm">
               <a href="/auth/google/login"
                  class="!text-emerald-700 hover:!text-emerald-600 visited:!text-emerald-700
                         dark:!text-emerald-400 dark:hover:!text-emerald-300 dark:visited:!text-emerald-400
                         no-underline hover:no-underline underline-offset-4 transition-colors cursor-pointer">
-                Google hesabınız ile giriş yaparak standart erişim özelliklerinden yararlanabilir, yeni bir kontenjan açıldığında heberdar olabilirsiniz.
+                Google hesabınız ile giriş yaparak standart erişim özelliklerinden yararlanabilir, yeni bir kontenjan açıldığında haberdar olabilirsiniz.
               </a>
             </p>
           {% else %}
@@ -172,43 +162,57 @@
             <!-- Hızlı Bakiye Özeti (Asil Üye) -->
             <h4 class="text-sm font-semibold mb-2">🏛️ Hızlı Bakiye Özeti</h4>
             <ul id="qb-list" class="text-sm grid grid-cols-1 gap-y-1">
-              <li class="flex items-center justify-between">
-                <div class="tooltip"><span>Aktif Bakiye</span>
-                  <span class="tooltiptext">Aktif Bakiye, yeni işlemler için veya açık pozisyanların
-                    finansı için kullanılan dinamik cüzdan bakiyesidir.</span>
-                  <span class="circle-icon">i</span>
-                </div><span id="qb-wallet">—</span>
-              </li>
-
-              <li class="flex items-center justify-between">
-                <div class="tooltip"><span>Net PnL</span>
-                  <span class="tooltiptext">Net PnL, belli bir ticaret döneminde
-                    işlem maliyetleri çıkarıldıktan sonra
-                    kalan nihai kâr veya zarardır.</span>
-                  <span class="circle-icon">i</span>
-                </div><span id="qb-net">—</span>
-              </li>
-<!--              <li class="flex items-center justify-between">-->
-<!--                <div class="tooltip"><span>Gerçekleşmemiş PnL</span>-->
-<!--                  <span class="tooltiptext">Gerçeklememiş PnL, aktif işlem çifti için açık olan işlemlere göre-->
-<!--                    hesaplanır. Eğer aktif pozisyon yoksa geçekleşmemiş PnL hesaplanmaz.</span>-->
-<!--                  <span class="circle-icon">i</span>-->
-<!--                  </div><span id="qb-upnl">—</span>-->
-<!--              </li>-->
-
-              <li id="qb-upnl-long-row" class="hidden flex flex items-center justify-between">
+            <!-- Aktif Bakiye -->
+            <li class="flex items-center justify-between">
+              <div class="tooltip">
+                <span>Aktif Bakiye</span>
+                <span class="circle-icon" role="button" tabindex="0" aria-label="Bilgi" aria-describedby="tt-qb-wallet">
+                  <span aria-hidden="true">i</span>
+                  <span id="tt-qb-wallet" class="tooltiptext" role="tooltip">
+                    Aktif Bakiye, yeni işlemler için veya açık <strong>pozisyonların</strong>
+                    finansı için kullanılan dinamik cüzdan bakiyesidir.
+                  </span>
+                </span>
+              </div>
+              <span id="qb-wallet">—</span>
+            </li>
+            <!-- Net PnL -->
+            <li class="flex items-center justify-between">
+              <div class="tooltip">
+                <span>Net PnL</span>
+                <span class="circle-icon" role="button" tabindex="0" aria-label="Bilgi" aria-describedby="tt-qb-net">
+                  <span aria-hidden="true">i</span>
+                  <span id="tt-qb-net" class="tooltiptext" role="tooltip">
+                    Net PnL, belli bir ticaret döneminde işlem maliyetleri çıkarıldıktan sonra
+                    kalan nihai kâr veya zarardır.
+                  </span>
+                </span>
+              </div>
+              <span id="qb-net">—</span>
+            </li>
+              <!-- Unrealized PnL Long -->
+              <li id="qb-upnl-long-row" class="hidden flex items-center justify-between">
                 <div class="tooltip">
                   <span>Gerçekleşmemiş PnL (L)</span>
-                  <span class="tooltiptext">Aktif sembolde long bacağın gerçekleşmemiş PnL değeri.</span>
-                  <span class="circle-icon">i</span>
+                  <span class="circle-icon" role="button" tabindex="0" aria-label="Bilgi" aria-describedby="tt-upnl-l">
+                    <span aria-hidden="true">i</span>
+                    <span id="tt-upnl-l" class="tooltiptext" role="tooltip">
+                    Aktif sembolde long bacağın gerçekleşmemiş PnL değeri.
+                   </span>
+                  </span>
                 </div>
                 <span id="qb-upnl-long" class="text-sm">—</span>
               </li>
-              <li id="qb-upnl-short-row" class="hidden flex flex items-center justify-between">
+              <!-- Unrealized PnL Short -->
+              <li id="qb-upnl-short-row" class="hidden flex items-center justify-between">
                 <div class="tooltip">
                   <span>Gerçekleşmemiş PnL (S)</span>
-                  <span class="tooltiptext">Aktif sembolde short bacağın gerçekleşmemiş PnL değeri.</span>
-                  <span class="circle-icon">i</span>
+                  <span class="circle-icon" role="button" tabindex="0" aria-label="Bilgi" aria-describedby="tt-upnl-s">
+                    <span aria-hidden="true">i</span>
+                    <span id="tt-upnl-s" class="tooltiptext" role="tooltip">
+                      Aktif sembolde short bacağın gerçekleşmemiş PnL değeri.
+                    </span>
+                  </span>
                 </div>
                 <span id="qb-upnl-short" class="text-sm">—</span>
               </li>
@@ -221,22 +225,6 @@
                 <span id="qb-last" class="text-xs leading-snug whitespace-nowrap truncate">—</span>
               </li>
             </ul>
-            <!-- a11y: quick-balance güncellemesi için live region -->
-<!--            <div id="qb-a11y" class="sr-only" aria-live="polite"></div>-->
-<!--            <div class="mt-2 flex items-center justify-end gap-2">-->
-<!--              &lt;!&ndash; Durum etiketi: sabit alan (w-20) + opacity ile görünür/gizli &ndash;&gt;-->
-<!--              <span id="qb-status"-->
-<!--                    class="text-xs select-none w-20 text-right whitespace-nowrap-->
-<!--                           opacity-0 transition-opacity duration-150">Yenilendi</span>-->
-<!--              <button id="qb-refresh" type="button"-->
-<!--                      aria-label="Hızlı bakiye özetini yenile" title="Hızlı bakiye özetini yenile"-->
-<!--                      class="h-8 px-3 rounded-lg border border-slate-300 text-slate-700-->
-<!--                             hover:bg-slate-200 focus-visible:ring-2 focus-visible:ring-slate-300-->
-<!--                             transition dark:border-slate-600 dark:text-slate-100-->
-<!--                             dark:hover:bg-slate-700 dark:focus-visible:ring-slate-500 text-sm">-->
-<!--                Yenile-->
-<!--              </button>-->
-<!--            </div>-->
           {% endif %}
         </div>
 
@@ -256,8 +244,6 @@
         {% endif %}
       </aside>
      </section>
-
-    <!-- Inline kaldırıldı: flag’leri panel_boot.js HTML data-* üzerinden okuyacak -->
 
     <!-- Tablolar yer tutucu -->
     <section id="sec-trades"
@@ -321,7 +307,7 @@
   {% endif %}
 
   <!-- flags -->
-  <script src="{{ url_for('static', path='js/panel_boot.js') }}?v=1" defer></script>
+  <script src="{{ url_for('static', path='js/panel_boot.js') }}?v=2" defer></script>
   <!-- Panel / Panel JS -->
   <script src="{{ url_for('static', path='js/panel_main.js') }}?v=20250908a" defer></script>
   {% if referral_verified %}
@@ -381,6 +367,6 @@
 <!-- Theme Toggle  -->
 <script src="{{ url_for('static', path='js/theme_toggle.js') }}?v=1c"></script>
 <!-- Theme Footer  -->
-<script src="{{ url_for('static', path='js/theme_footer.js') }}?v=1a"></script>
+<script src="{{ url_for('static', path='js/theme_footer.js') }}?v=2b"></script>
 </body>
 </html>

@@ -1,7 +1,10 @@
 /* app/static/css/panel_extras.css */
+@supports(padding:max(env(safe-area-inset-left))) {
+  body { padding-left: max(12px, env(safe-area-inset-left));
+         padding-right: max(12px, env(safe-area-inset-right)); }
+}
 .chip{display:inline-flex;align-items:center;height:28px;padding:0 10px;border-radius:10px;font-size:12px;border:1px solid rgb(203 213 225/0.6)}
 .card{border:1px solid rgb(226 232 240);border-radius:16px;background:#fff}
-/* Dark: kartları bir ton AÇ (slate-800) ve sınırı slate-700 yap */
 .dark .card{border-color:#334155;background:#1f2937}
 .kpi{border:1px solid rgb(226 232 240);border-radius:14px;padding:12px 12px 10px;background:#fff}
 .dark .kpi{background:#1f2937;border-color:#334155}
@@ -122,60 +125,68 @@ dialog#ref-modal::backdrop { background: rgba(0,0,0,0.5); }
 }
 
 /* Özel genişlik sınıfı */
+/* 1 rem = 16px Örnek: 1400px; */
+/*
   .max-w-custom {
-    max-width: 98rem; /* 1 rem = 16px Örnek: 1400px; */
+    max-width: 98rem;
+}
+*/
+
+/* =======================================================================
+   Tooltip v3 — viewport-ankrajlı (JS ile konum), taşma yok
+   ======================================================================= */
+
+.tooltip{
+  display:inline-flex; align-items:center; gap:6px;
 }
 
-/* Custom tooltip */
-        .tooltip {
-            position: relative;
-            display: inline-block;
-            cursor: pointer;
-        }
+.tooltip > .circle-icon{
+  position:relative;
+  display:inline-grid; place-items:center;
+  width:14px; height:14px; border-radius:9999px;
+  background:rgba(2,6,23,.08); color:#0f172a;
+  font-size:10px; font-weight:700; line-height:1;
+  cursor:help; outline:none;
+}
+.dark .tooltip > .circle-icon{ background:rgba(148,163,184,.18); color:#e2e8f0; }
 
-        .tooltip .tooltiptext {
-            visibility: hidden;
-            width: 220px;
-            background-color: rgb(47, 59, 81, 0.85); /* rgba(0, 0, 0, 0.80); */
-            color: #e2e6e9;
-            text-align: left;
-            border-radius: 6px;
-            padding: 8px 10px;
-            position: absolute;
-            z-index: 1;
-            bottom: 150%;
-            left: 50%;
-            margin-left: -60px;
-        }
+/* Tooltip kutusu: JS ile verilen koordinatlara (CSS var'ları) sabitlenir */
+.tooltip > .circle-icon .tooltiptext{
+  position:fixed;
+  left:var(--tt-left,0px);
+  top:var(--tt-top,0px);
+  display:none;             /* icon[data-open="1"] olduğunda görünür */
+  z-index:60;
 
-        .tooltip .tooltiptext::after {
-            content: "";
-            position: absolute;
-            top: 100%;
-            left: 50%;
-            margin-left: -5px;
-        }
+  /* Okunabilirlik */
+  font-size:0.875rem; line-height:1.45; font-weight:500;
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
 
-        .tooltip:hover .tooltiptext {
-            visibility: visible;
-        }
+  /* Genişlik: ekran içinde kal, sarma açık */
+  width:min(28rem, calc(100vw - 24px));  /* ~max 448px, mobilde viewport'a göre */
+  white-space:normal; overflow-wrap:break-word; word-break:normal;
 
-        body {
-         /*   font-family: Arial, sans-serif; */
-            padding: 40px;
-            line-height: 1.6;
-        }
+  /* Görünüş */
+  background:rgba(30,41,59,.92); color:#e2e6e9;
+  border-radius:6px; padding:8px 10px;
+  box-shadow:0 10px 20px rgba(2,6,23,.35);
+}
 
-        .circle-icon {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            width: 13px;
-            height: 13px;
-            border-radius: 50%;
-            background-color: rgb(40, 89, 134, 0.80);
-            color: white;
-          /*  font-weight: bold; */
-            font-size: 9px;
-            cursor: pointer;
-        }
+/* Ok: X pozisyonu JS’ten gelir */
+.tooltip > .circle-icon .tooltiptext::after{
+  content:"";
+  position:fixed;
+  left:calc(var(--tt-arrow-x, 0px));
+  top:calc(var(--tt-arrow-y, 0px));
+  border:6px solid transparent; border-top-color:rgba(30,41,59,.92);
+}
+
+/* Aç/kapa */
+.tooltip > .circle-icon[data-open="1"] .tooltiptext{ display:block; }
+
+/* (İsteğe bağlı) hafif animasyon */
+@media (prefers-reduced-motion:no-preference){
+  .tooltip > .circle-icon .tooltiptext{
+    transition:opacity .12s ease, transform .12s ease;
+  }
+}
