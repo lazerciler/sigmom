@@ -5,19 +5,27 @@ from fastapi import APIRouter, Depends, Request, HTTPException, Form
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 from io import StringIO, BytesIO
 from datetime import datetime, timedelta
-
+from pathlib import Path
 import bcrypt
 import secrets
 import string
 import pyzipper
 
-from app.database import async_session
-from app.dependencies.auth import get_current_user, require_admin
+from app.database import get_db
+from app.dependencies.auth import require_admin_db
 
-templates = Jinja2Templates(directory="app/templates")
-router = APIRouter(prefix="/admin/referrals", tags=["admin-referrals"])
+TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"  # app/templates
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+router = APIRouter(
+    prefix="/admin/referrals",
+    tags=["admin"],
+    # Tüm endpoint'ler admin korumalı
+    dependencies=[Depends(require_admin_db)],
+)
 
 CSP = (
     "default-src 'self'; "
@@ -35,13 +43,12 @@ def _gen_plain():
     return "-".join("".join(secrets.choice(ALPH) for _ in range(4)) for _ in range(3))
 
 
-async def _fetch_panel_data():
-    async with async_session() as db:
-        # Kullanıcı listesi: claimed + reserved görünümü
-        users = (
-            await db.execute(
-                text(
-                    """
+async def _fetch_panel_data(db: AsyncSession):
+    # Kullanıcı listesi: claimed + reserved görünümü
+    users = (
+        await db.execute(
+            text(
+                """
             SELECT
               u.id,
               u.email,
@@ -72,54 +79,56 @@ async def _fetch_panel_data():
             ORDER BY u.created_at DESC
             LIMIT 200
         """
-                )
             )
-        ).all()
+        )
+    ).all()
 
-        # Kod listesi: kime rezerve edildiğini göstermek için user join
-        codes = (
-            await db.execute(
-                text(
-                    """
-            SELECT
-              rc.id,
-              rc.status,
-              rc.email_reserved,
-              rc.expires_at,
-              u.id   AS reserved_user_id,
-              u.name AS reserved_user_name
-            FROM referral_codes rc
-            LEFT JOIN users u
-              ON u.email = rc.email_reserved
-            ORDER BY rc.id DESC
-            LIMIT 300
+    # Kod listesi: kime rezerve edildiğini göstermek için user join
+    codes = (
+        await db.execute(
+            text(
+                """
+        SELECT
+          rc.id,
+          rc.status,
+          rc.email_reserved,
+          rc.expires_at,
+          u.id   AS reserved_user_id,
+          u.name AS reserved_user_name
+        FROM referral_codes rc
+        LEFT JOIN users u
+          ON u.email = rc.email_reserved
+        ORDER BY rc.id DESC
+        LIMIT 300
         """
-                )
             )
-        ).all()
+        )
+    ).all()
 
-        # Free pool: SADECE AVAILABLE
-        free_codes = (
-            await db.execute(
-                text(
-                    """
-            SELECT id
-            FROM referral_codes
-            WHERE status='AVAILABLE'
-            ORDER BY id DESC
-            LIMIT 50
+    # Free pool: SADECE AVAILABLE
+    free_codes = (
+        await db.execute(
+            text(
+                """
+        SELECT id
+        FROM referral_codes
+        WHERE status='AVAILABLE'
+        ORDER BY id DESC
+        LIMIT 50
         """
-                )
             )
-        ).all()
-
+        )
+    ).all()
     return users, codes, free_codes
 
 
 @router.get("", response_class=HTMLResponse)
-async def panel(request: Request, current_user=Depends(get_current_user)):
-    require_admin(current_user)
-    users, codes, free_codes = await _fetch_panel_data()
+async def panel(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    me=Depends(require_admin_db),
+):
+    users, codes, free_codes = await _fetch_panel_data(db)
     return templates.TemplateResponse(
         "admin_referrals.html",
         {
@@ -127,7 +136,7 @@ async def panel(request: Request, current_user=Depends(get_current_user)):
             "users": users,
             "codes": codes,
             "free_codes": free_codes,
-            "current_user": current_user,
+            "me": me,
         },
         headers={
             "Content-Security-Policy": CSP,
@@ -141,15 +150,11 @@ async def panel(request: Request, current_user=Depends(get_current_user)):
 @router.post("/expire_cleanup", response_class=HTMLResponse)
 async def expire_cleanup(
     request: Request,
-    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    require_admin(current_user)
-    async with async_session() as db:
-        async with db.begin():
-            # result = await db.execute(
-            await db.execute(
-                text(
-                    """
+    await db.execute(
+        text(
+            """
                 UPDATE referral_codes
                 SET status='AVAILABLE',
                     email_reserved=NULL,
@@ -159,10 +164,11 @@ async def expire_cleanup(
                   AND expires_at IS NOT NULL
                   AND expires_at < NOW()
             """
-                )
-            )
-        # result.rowcount ile kaç satırın temizlendiğini görmek istersen loglayabilirsin
-    return await panel(request, current_user)
+        )
+    )
+    await db.commit()
+    # result.rowcount ile kaç satırın temizlendiğini görmek istersen loglayabilirsin
+    return await panel(request, db=db, me=None)  # router guard zaten admin
 
 
 @router.post("/assign", response_class=HTMLResponse)
@@ -171,9 +177,9 @@ async def assign(
     email: str = Form(...),
     referral_id: int = Form(...),  # ikisi de ZORUNLU
     plain_code: str = Form(...),  # ikisi de ZORUNLU
-    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    me=Depends(require_admin_db),
 ):
-    require_admin(current_user)
 
     email = (email or "").strip().lower()
     if not email:
@@ -184,164 +190,152 @@ async def assign(
     DEFAULT_RESERVE_DAYS = 14
     exp_new = now + timedelta(days=DEFAULT_RESERVE_DAYS)
 
-    async with async_session() as db:
-        async with db.begin():
-            # Kullanıcıyı al/oluştur (kilitle)
-            row = (
-                await db.execute(
-                    text("SELECT id FROM users WHERE email=:e FOR UPDATE"),
-                    {"e": email},
-                )
-            ).first()
-            if row:
-                uid = row[0]
-                await db.execute(
-                    text("UPDATE users SET updated_at=:t WHERE id=:id"),
-                    {"t": now, "id": uid},
-                )
-            else:
-                await db.execute(
-                    text(
-                        """
-                        INSERT INTO users (email, is_active, created_at, updated_at)
-                        VALUES (:e, 1, :t, :t)
-                    """
-                    ),
-                    {"e": email, "t": now},
-                )
-                uid = (await db.execute(text("SELECT LAST_INSERT_ID()"))).first()[0]
+    # Kullanıcıyı al/oluştur (kilitle)
+    row = (
+        await db.execute(
+            text("SELECT id FROM users WHERE email=:e FOR UPDATE"),
+            {"e": email},
+        )
+    ).first()
+    if row:
+        uid = row[0]
+        await db.execute(
+            text("UPDATE users SET updated_at=:t WHERE id=:id"),
+            {"t": now, "id": uid},
+        )
+    else:
+        await db.execute(
+            text(
+                """
+                    INSERT INTO users (email, is_active, created_at, updated_at)
+                    VALUES (:e, 1, :t, :t)
+                """
+            ),
+            {"e": email, "t": now},
+        )
+        uid = (await db.execute(text("SELECT LAST_INSERT_ID()"))).first()[0]
 
-            # Seçilen ID'yi kilitle ve hash'i getir
-            row = (
-                await db.execute(
-                    text(
-                        """
-                SELECT id, code_hash, status, email_reserved, expires_at
-                FROM referral_codes
-                WHERE id=:rid
-                FOR UPDATE
+    # Seçilen ID'yi kilitle ve hash'i getir
+    row = (
+        await db.execute(
+            text(
+                """
+        SELECT id, code_hash, status, email_reserved, expires_at
+        FROM referral_codes
+        WHERE id=:rid
+        FOR UPDATE
+        """
+            ),
+            {"rid": referral_id},
+        )
+    ).first()
+    if not row:
+        raise HTTPException(400, "Kod bulunamadı.")
+
+    _id, chash, status, email_res, exp = row
+
+    # CLAIMED'e asla atama yapma
+    if status == "CLAIMED":
+        raise HTTPException(409, "Kod zaten CLAIMED.")
+
+    # Düz kod → hash doğrulaması (ID ile EŞLEŞME zorunlu)
+    raw = (plain_code or "").strip().upper().encode("utf-8")
+    try:
+        if not bcrypt.checkpw(raw, chash.encode("utf-8")):
+            raise HTTPException(400, "Düz kod bu ID ile eşleşmiyor.")
+    except Exception:
+        raise HTTPException(400, "Düz kod doğrulanamadı.")
+
+    # Başka e-postaya tahsisli RESERVED ise engelle
+    if status == "RESERVED" and email_res and email_res.strip().lower() != email:
+        raise HTTPException(400, "Kod farklı bir e-posta için tahsisli.")
+
+    # === RESERVE === (CLAIM YOK)
+    await db.execute(
+        text(
             """
-                    ),
-                    {"rid": referral_id},
-                )
-            ).first()
-            if not row:
-                raise HTTPException(400, "Kod bulunamadı.")
+            UPDATE referral_codes
+            SET status='RESERVED',
+                email_reserved=:email,
+                expires_at=:exp,
+                used_by_user_id=NULL,
+                used_at=NULL
+            WHERE id=:rid AND status!='CLAIMED'
+        """
+        ),
+        {"email": email, "exp": exp_new, "rid": referral_id},
+    )
 
-            _id, chash, status, email_res, exp = row
-
-            # CLAIMED'e asla atama yapma
-            if status == "CLAIMED":
-                raise HTTPException(409, "Kod zaten CLAIMED.")
-
-            # Düz kod → hash doğrulaması (ID ile EŞLEŞME zorunlu)
-            raw = (plain_code or "").strip().upper().encode("utf-8")
-            try:
-                if not bcrypt.checkpw(raw, chash.encode("utf-8")):
-                    raise HTTPException(400, "Düz kod bu ID ile eşleşmiyor.")
-            except Exception:
-                raise HTTPException(400, "Düz kod doğrulanamadı.")
-
-            # Başka e-postaya tahsisli RESERVED ise engelle
-            if (
-                status == "RESERVED"
-                and email_res
-                and email_res.strip().lower() != email
-            ):
-                raise HTTPException(400, "Kod farklı bir e-posta için tahsisli.")
-
-            # Süresi geçmiş RESERVED ise, admin rezerve edebiliriz → yeni süre yaz
-            # AVAILABLE ise de yeni rezerv süresi yazacağız.
-
-            # === RESERVE === (CLAIM YOK)
-            await db.execute(
-                text(
-                    """
-                UPDATE referral_codes
-                SET status='RESERVED',
-                    email_reserved=:email,
-                    expires_at=:exp,
-                    used_by_user_id=NULL,
-                    used_at=NULL
-                WHERE id=:rid AND status!='CLAIMED'
-            """
-                ),
-                {"email": email, "exp": exp_new, "rid": referral_id},
-            )
-
-    # Paneli tazele
-    return await panel(request, current_user)
+    await db.commit()
+    return await panel(request, db=db, me=me)
 
 
 @router.post("/unassign", response_class=HTMLResponse)
 async def unassign(
     request: Request,
     user_id: int = Form(...),
-    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
 ):
-    require_admin(current_user)
     now = datetime.utcnow()
 
-    async with async_session() as db:
-        async with db.begin():
-            # 1) Kullanıcının son CLAIMED kodunu kilitleyerek al
-            row = (
-                await db.execute(
-                    text(
-                        """
-                SELECT id FROM referral_codes
-                WHERE used_by_user_id=:uid AND status='CLAIMED'
-                ORDER BY used_at DESC
-                LIMIT 1
-                FOR UPDATE
+    # Transaction zaten açık olabilir; doğrudan çalıştır, en sonda commit et
+    # 1) Kullanıcının son CLAIMED kodunu kilitleyerek al
+    row = (
+        await db.execute(
+            text(
+                """
+            SELECT id FROM referral_codes
+            WHERE used_by_user_id=:uid AND status='CLAIMED'
+            ORDER BY used_at DESC
+            LIMIT 1
+            FOR UPDATE
+        """
+            ),
+            {"uid": user_id},
+        )
+    ).first()
+    if not row:
+        raise HTTPException(400, "Kullanıcıda bağlı CLAIMED kod bulunamadı.")
+    rid = row[0]
+
+    # 2) Kodu tamamen boşa çıkar: AVAILABLE + tüm tahsis/claim alanlarını temizle
+    result = await db.execute(
+        text(
             """
-                    ),
-                    {"uid": user_id},
-                )
-            ).first()
-            if not row:
-                raise HTTPException(400, "Kullanıcıda bağlı CLAIMED kod bulunamadı.")
-            rid = row[0]
+            UPDATE referral_codes
+            SET status='AVAILABLE',
+                email_reserved=NULL,
+                expires_at=NULL,
+                used_by_user_id=NULL,
+                used_at=NULL
+            WHERE id=:rid AND status='CLAIMED'
+        """
+        ),
+        {"rid": rid},
+    )
 
-            # 2) Kodu tamamen boşa çıkar: AVAILABLE + tüm tahsis/claim alanlarını temizle
-            result = await db.execute(
-                text(
-                    """
-                UPDATE referral_codes
-                SET status='AVAILABLE',
-                    email_reserved=NULL,
-                    expires_at=NULL,
-                    used_by_user_id=NULL,
-                    used_at=NULL
-                WHERE id=:rid AND status='CLAIMED'
+    if result.rowcount == 0:
+        # Yarış durumu: kayıt CLAIMED değilse vs.
+        raise HTTPException(409, "Kod bu sırada değişti; lütfen tekrar deneyin.")
+
+    # 3) Kullanıcıda başka CLAIMED yoksa, üyelik damgasını da temizle
+    await db.execute(
+        text(
             """
-                ),
-                {"rid": rid},
-            )
+            UPDATE users
+            SET referral_verified_at=NULL, updated_at=:t
+            WHERE id=:uid
+              AND NOT EXISTS (
+                  SELECT 1 FROM referral_codes
+                  WHERE used_by_user_id=:uid AND status='CLAIMED'
+              )
+        """
+        ),
+        {"t": now, "uid": user_id},
+    )
 
-            if result.rowcount == 0:
-                # Yarış durumu: kayıt CLAIMED değilse vs.
-                raise HTTPException(
-                    409, "Kod bu sırada değişti; lütfen tekrar deneyin."
-                )
-
-            # 3) Kullanıcıda başka CLAIMED yoksa, üyelik damgasını da temizle
-            await db.execute(
-                text(
-                    """
-                UPDATE users
-                SET referral_verified_at=NULL, updated_at=:t
-                WHERE id=:uid
-                  AND NOT EXISTS (
-                      SELECT 1 FROM referral_codes
-                      WHERE used_by_user_id=:uid AND status='CLAIMED'
-                  )
-            """
-                ),
-                {"t": now, "uid": user_id},
-            )
-
-    return await panel(request, current_user)
+    await db.commit()
+    return await panel(request, db=db, me=None)
 
 
 @router.post("/generate", response_class=HTMLResponse)
@@ -352,7 +346,8 @@ async def generate(
     email_reserved: str = Form(None),  # NOT: AVAILABLE üretimde kullanılmıyor
     mode: str = Form("download"),  # "download" | "zip"
     zip_password: str = Form(None),  # ZIP için opsiyonel parola
-    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    me=Depends(require_admin_db),
 ):
     """
     Yeni referans kodları üretir ve plaintext CSV/ZIP olarak indirir.
@@ -360,7 +355,6 @@ async def generate(
       email_reserved = NULL, expires_at = NULL
     - Rezerve/expiry işleri /assign ile yönetilir.
     """
-    admin = require_admin(current_user)
     count = max(1, min(100, int(count or 1)))
     days = max(
         1, min(180, int(days or 14))
@@ -368,38 +362,73 @@ async def generate(
     email_reserved = (email_reserved or "").strip().lower() or None
 
     created = []
+    email_reserved = (email_reserved or "").strip().lower() or None
+    from datetime import datetime, timedelta
 
-    async with async_session() as db:
-        async with db.begin():
-            for _ in range(count):
-                plain = _gen_plain()
-                code_hash = bcrypt.hashpw(
-                    plain.strip().upper().encode("utf-8"), bcrypt.gensalt()
-                ).decode("utf-8")
+    expires_at_val = (
+        (datetime.utcnow() + timedelta(days=int(days))) if email_reserved else None
+    )
 
-                # status sütununu yazmıyoruz → DEFAULT 'AVAILABLE'
-                await db.execute(
-                    text(
-                        """
-                        INSERT INTO referral_codes
-                          (code_hash, email_reserved, tier, invited_by_admin_id, expires_at)
-                        VALUES
-                          (:h, NULL, 'default', :admin_id, NULL)
+    for _ in range(count):
+        plain = _gen_plain()
+        code_hash = bcrypt.hashpw(
+            plain.strip().upper().encode("utf-8"), bcrypt.gensalt()
+        ).decode("utf-8")
+
+        if email_reserved:
+            # Rezerve kod üret (admin tarafından ayrılmış)
+            await db.execute(
+                text(
                     """
-                    ),
-                    {"h": code_hash, "admin_id": admin["id"]},
-                )
+                    INSERT INTO referral_codes
+                      (code_hash, email_reserved, status, tier, invited_by_admin_id, expires_at)
+                    VALUES
+                      (:h, :email, 'RESERVED', 'default', :admin_id, :exp)
+                    """
+                ),
+                {
+                    "h": code_hash,
+                    "email": email_reserved,
+                    "admin_id": me["id"],
+                    "exp": expires_at_val,
+                },
+            )
+        else:
+            # Boş havuza at (AVAILABLE)
+            await db.execute(
+                text(
+                    """
+                    INSERT INTO referral_codes
+                      (code_hash, status, tier, invited_by_admin_id)
+                    VALUES
+                      (:h, 'AVAILABLE', 'default', :admin_id)
+                    """
+                ),
+                {"h": code_hash, "admin_id": me["id"]},
+            )
 
-                rid = (await db.execute(text("SELECT LAST_INSERT_ID()"))).first()[0]
-                created.append({"id": rid, "plain": plain})
+        rid = (await db.execute(text("SELECT LAST_INSERT_ID()"))).first()[0]
+        created.append(
+            {
+                "id": rid,
+                "plain": plain,
+                "email_reserved": email_reserved or "",
+                "expires_at": (
+                    expires_at_val.isoformat(sep=" ") if expires_at_val else ""
+                ),
+            }
+        )
+    await db.commit()
 
     # CSV içeriği (AVAILABLE üretimde email_reserved/expiry boş kalır)
     csv_buf = StringIO()
     csv_buf.write("sep=,\n")
+
     csv_buf.write("id,code,email_reserved,expires_at\n")
     for row in created:
-        # email_reserved="", expires_at="" → boş alan
-        csv_buf.write(f'{row["id"]},{row["plain"]},,\n')
+        csv_buf.write(
+            f'{row["id"]},{row["plain"]},{row["email_reserved"]},{row["expires_at"]}\n'
+        )
 
     csv_bytes = csv_buf.getvalue().encode("utf-8")
     ts = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
@@ -436,22 +465,20 @@ async def generate(
 
 
 @router.get("/export")
-async def export(current_user=Depends(get_current_user)):
+async def export(db: AsyncSession = Depends(get_db)):
     """
     Kullanıcı bazında CLAIMED özetini CSV olarak dışa aktarır.
     Kolonlar: user_id,email,referral_id,is_claimed,used_at
     """
-    require_admin(current_user)
 
     buf = StringIO()
     buf.write("sep=,\n")
     buf.write("user_id,email,referral_id,is_claimed,used_at\n")
 
-    async with async_session() as db:
-        rows = (
-            await db.execute(
-                text(
-                    """
+    rows = (
+        await db.execute(
+            text(
+                """
             SELECT
                 u.id,
                 u.email,
@@ -477,9 +504,9 @@ async def export(current_user=Depends(get_current_user)):
             FROM users u
             ORDER BY u.id ASC
         """
-                )
             )
-        ).all()
+        )
+    ).all()
 
     for uid, email, ref_id, is_claimed, used_at in rows:
         used_at_str = used_at.isoformat() + "Z" if used_at else ""

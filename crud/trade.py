@@ -13,10 +13,38 @@ from app.utils.position_utils import position_matches, confirm_open_trade
 from sqlalchemy import text
 
 
+async def find_merge_candidate(
+    db: AsyncSession,
+    *,
+    symbol: str,
+    exchange: str,
+    side: str,
+    fund_manager_id: str,
+) -> Optional[StrategyOpenTrade]:
+    """
+    Aynı (symbol, exchange, side, fund_manager) için 'open' ya da 'pending' durumdaki
+    en güncel açık pozisyonu döndürür.
+    """
+    q = (
+        select(StrategyOpenTrade)
+        .where(
+            func.upper(StrategyOpenTrade.symbol) == (symbol or "").strip().upper(),
+            StrategyOpenTrade.exchange == (exchange or "").strip(),
+            StrategyOpenTrade.side == (side or "").strip().lower(),
+            StrategyOpenTrade.fund_manager_id == (fund_manager_id or "").strip(),
+            StrategyOpenTrade.status.in_(("open", "pending")),
+        )
+        .order_by(desc(StrategyOpenTrade.id))
+        .limit(1)
+    )
+    res = await db.execute(q)
+    return res.scalar_one_or_none()
+
+
 def pick_close_price(position_data: dict) -> Decimal:
-    """Select a valid (>0) close price from common execution/market fields.
-    Never fall back to entryPrice or 0.
-    Preference: avgClosePrice, avgPrice, price, lastPrice, closePrice, markPrice.
+    """Ortak işlem/piyasa alanlarından geçerli (>0) bir kapanış fiyatı seçin.
+    EntryPrice veya 0'a asla geri dönmeyin.
+    Tercih: avgClosePrice, avgPrice, price, lastPrice, closePrice, markPrice.
     """
     for key in (
         "avgClosePrice",

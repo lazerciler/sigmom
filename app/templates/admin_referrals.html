@@ -1,15 +1,15 @@
 <!doctype html>
-<html lang="tr" class="dark">
+<html lang="tr" class="{% if request.cookies.get('theme') == 'dark' %}dark{% endif %}">
 <head>
   <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Admin • Referans Yönetimi</title>
-  <!-- Dark mode ve Tailwind config -->
-  <script src="{{ url_for('static', path='js/admin_referrals_head.js') }}?v=4a"></script>
+  <!-- Theme Boot -->
+  <script src="{{ url_for('static', path='js/theme_boot.js') }}?v=1a"></script>
   <!-- Tailwind  -->
   <link rel="stylesheet" href="{{ url_for('static', path='css/tw.css') }}?v=4k">
   <!-- HTMX -->
-  <script src="{{ url_for('static', path='js/htmx.min.js') }}"></script>
+  <script src="{{ url_for('static', path='js/vendor/htmx/2.0.6/htmx.min.js') }}"></script>
 </head>
 
 <body class="bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-100">
@@ -18,7 +18,8 @@
     <!-- Başlık -->
     <header class="px-6 py-4 border-b bg-white dark:bg-slate-800 dark:border-slate-700 flex items-center justify-between rounded-xl">
       <div>
-        <h1 class="text-2xl font-semibold">Referans Yönetimi</h1>
+        <h1 class="text-2xl font-semibold">
+          <a href="/admin/settings" title="Admin Settings">⏻</a> Referans Yönetimi</h1>
         <p class="text-sm text-slate-500 dark:text-slate-400">
           Kodlar veritabanında <em>hash</em> olarak saklanır; plaintext yalnızca indirilen dosyada bulunur.
         </p>
@@ -256,6 +257,8 @@
     </section>
 
   </main>
-<script src="{{ url_for('static', path='js/admin_referrals.js') }}" defer></script>
+  <!-- Toggle  -->
+  <script src="{{ url_for('static', path='js/theme_toggle.js') }}?v=1a"></script>
+  <script src="{{ url_for('static', path='js/admin_referrals.js') }}?v=2a" defer></script>
 </body>
 </html>

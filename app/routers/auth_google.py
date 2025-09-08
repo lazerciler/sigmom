@@ -8,15 +8,16 @@ from typing import Optional
 from urllib.parse import urlencode
 
 import httpx
-from fastapi import APIRouter, Request, HTTPException
+from fastapi import APIRouter, Request, HTTPException, Depends
 from fastapi.responses import RedirectResponse
-from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 from itsdangerous import URLSafeSerializer, BadSignature  # stateless state
 
 from app.config import settings
-from app.database import async_session
+from app.database import get_db
+from app.user import create_or_update_on_google_login
 
-router = APIRouter()
+router = APIRouter(prefix="/auth/google", tags=["auth"])
 
 AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -54,6 +55,7 @@ async def callback(
     code: Optional[str] = None,
     state: Optional[str] = None,
     error: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
 ):
     if error:
         raise HTTPException(400, f"Google error: {error}")
@@ -97,35 +99,29 @@ async def callback(
     name = info.get("name") or ""
     picture = info.get("picture") or ""
     if not email:
-        raise HTTPException(400, "Email alınamadı.")
+        raise HTTPException(400, "Email required.")
 
-    # DB: async upsert (id,email,name,avatar_url)
-    async with async_session() as db:
-        row = (
-            await db.execute(text("SELECT id FROM users WHERE email=:e"), {"e": email})
-        ).first()
-        if row:
-            uid = row[0]
-            await db.execute(
-                text(
-                    """UPDATE users
-                        SET google_sub=:s, name=:n, avatar_url=:p, updated_at=NOW()
-                        WHERE id=:id"""
-                ),
-                {"s": sub, "n": name, "p": picture, "id": uid},
-            )
-        else:
-            ins = await db.execute(
-                text(
-                    """INSERT INTO users (email, name, google_sub, avatar_url, created_at)
-                        VALUES (:e, :n, :s, :p, NOW())"""
-                ),
-                {"e": email, "n": name, "s": sub, "p": picture},
-            )
-            uid = ins.lastrowid
-        await db.commit()
+    # DB upsert: mevcut mimarideki fonksiyonu kullan
+    user = await create_or_update_on_google_login(
+        db, sub=sub, email=email, name=name, picture_url=picture
+    )
+    await db.commit()
+    # Eski yöntem
+    # # Session: projede kullanılan anahtarla hizala
+    # request.session["user_id"] = int(user.id)
 
-    request.session["uid"] = int(uid)  # sadece uid'yi session'a yazıyoruz
+    # Yeni yöntem
+    # Session: IdP (Google) claim'lerini oturuma koy
+    # (isteğe bağlı sabitleme: önce oturumu temizle)
+    request.session.clear()
+    request.session.update(
+        {
+            "user_id": int(user.id),  # DB user id
+            "email": email,  # Google UserInfo'dan
+            "email_verified": bool(info.get("email_verified", True)),
+            "sub": sub,  # Google unique subject
+        }
+    )
     return RedirectResponse("/", status_code=302)
 
 

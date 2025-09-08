@@ -8,7 +8,7 @@
     :root { --bg:#0b1220; --card:#121b2e; --txt:#e3e8f4; --muted:#93a1b3; --accent:#4da3ff; --ok:#2ecc71; --warn:#f39c12; --err:#e74c3c; }
     * { box-sizing: border-box; }
     body { margin: 0; font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, 'Helvetica Neue', Arial; color: var(--txt); background: radial-gradient(1200px 800px at 10% -10%, #1a2642, #0b1220); }
-    .wrap { max-width: 980px; margin: 32px auto; padding: 0 16px; }
+    .wrap { max-width: 980px; margin: 15px auto; padding: 0 16px; }
     h1 { font-size: 22px; margin: 0 0 16px; }
     .card { background: var(--card); border: 1px solid #233153; border-radius: 14px; padding: 16px; margin-bottom: 16px; box-shadow: 0 6px 24px rgba(0,0,0,0.25); }
     label { display: block; color: var(--muted); margin-bottom: 6px; }
@@ -31,22 +31,88 @@
     .warn { color: var(--warn) }
     .err { color: var(--err) }
     .small { font-size: 12px; }
+    .wrap .card:first-child h1{
+      display:flex;                /* span'leri de aynı satıra al */
+      justify-content:left;        /* yatayda ortala */
+      align-items:center;          /* dikey hizala */
+      gap:8px;                     /* metin–rozet aralığı */
+      flex-wrap:wrap;              /* dar ekranda alta kayabilsin */
+      margin:0;
+      text-align:center;           /* çok uzun metin için güvence */
+    }
+    a {
+  text-decoration: none;
+  color: #fff;
+}
+
+@media (max-width: 768px) {
+  .g2 {
+    grid-template-columns: 1fr !important;
+  }
+
+  .g3 {
+    grid-template-columns: repeat(2, 1fr) !important; /* 2 sütun yap */
+    gap: 8px;
+  }
+
+  /* Mode ve Side için özel düzenleme */
+  .g3 > div:nth-child(1) {
+    grid-column: 1 / -1; /* Exchange tam genişlik */
+    margin-bottom: 8px;
+  }
+
+  .g3 > div:nth-child(2),
+  .g3 > div:nth-child(3) {
+    grid-column: auto; /* Mode ve Side yan yana */
+  }
+
+  .row {
+    flex-direction: row; /* Radio butonları yan yana kalsın */
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  /* Radio butonlarını daha kompakt yap */
+  .radio {
+    padding: 4px 8px;
+    font-size: 13px;
+  }
+}
+
+/* Daha küçük ekranlar için */
+@media (max-width: 480px) {
+  .g3 {
+    grid-template-columns: 1fr !important; /* Çok küçük ekranda tek sütun */
+  }
+
+  .g3 > div:nth-child(2),
+  .g3 > div:nth-child(3) {
+    grid-column: 1 / -1; /* Tam genişlik */
+  }
+}
+
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <h1>SIGMOM — Webhook Test Panel <span id="status" class="pill">idle</span>
+  <div class="wrap"><div class="card">
+    <h1><a href="/admin/settings" title="Admin Settings">⏻</a> Webhook Test Paneli
+      <span id="status" class="pill">idle</span>
+      <span id="respBadge" class="pill">–</span>
     <span id="modeBadge" class="pill">mode…</span></h1>
-
+    </div>
     <div class="card">
       <div class="grid g3">
-        <div>
-          <label>Exchange</label>
-          <select id="exchange">
-            <option value="binance_futures_testnet" selected>binance_futures_testnet</option>
-          </select>
-          <div class="hint small">Şablonu test etmek için testnet kullanıyoruz.</div>
-        </div>
+<div>
+  <label>Exchange</label>
+  <div style="display:flex; align-items:center; gap:8px;">
+    <span id="exchangeDisplay" class="pill" style="padding:10px 12px; background:#0e1730; border:1px solid #2a3a61; border-radius:10px;">
+      binance_futures_testnet
+    </span>
+    <span id="exchangeStatus" class="pill ok" style="display:none;">✓</span>
+  </div>
+  <input type="hidden" id="exchange" value="binance_futures_testnet">
+  <div class="hint small">Exchange otomatik olarak API'den alınır.</div>
+</div>
 
         <div>
           <label>Mode</label>
@@ -68,47 +134,66 @@
       <div class="grid g2" style="margin-top:12px">
         <div>
           <label>Symbol</label>
-          <input id="symbol" type="text" value="BTCUSDT" />
-          <div class="hint small">Otomatik <code>upper()</code> uygulanır.</div>
+
+          <select id="symbol">
+            <option value="BTCUSDT" selected>BTCUSDT</option>
+            <option value="ETHUSDT">ETHUSDT</option>
+          </select>
+          <div class="hint small">Varsayılan test çiftleri BTCUSDT veya ETHUSDT.</div>
+
         </div>
         <div>
           <label>Position Size</label>
-          <input id="position_size" type="number" value="0.03" step="0.0001" min="0" />
+          <input id="position_size" type="number" value="0.01" step="0.0001" min="0" />
+          <div class="hint small">Varsayılan size: 0.01</div>
         </div>
       </div>
-
       <div class="grid g3" style="margin-top:12px">
         <div>
-          <label>Leverage (opsiyonel)</label>
-          <input id="leverage" type="number" placeholder="örn. 5" min="1" max="125" />
-          <div class="hint small">Boş bırakırsan kaldıraç ayarı atlanır.</div>
+          <label>Leverage</label>
+          <input id="leverage" value="5" type="number" placeholder="örn. 5" min="1" max="125" />
+          <div class="hint small">Varsayılan kaldıraç: 5x (aralık: 1–125).</div>
         </div>
         <div>
           <label>Order Type</label>
-          <input id="order_type" type="text" value="market" readonly/>
+          <select id="order_type">
+            <option value="market" selected>Market</option>
+            <option value="limit">Limit</option>
+          </select>
+          <div class="hint small">Market veya Limit.</div>
         </div>
         <div>
-          <label>Fund Manager ID</label>
-          <input id="fund_manager_id" type="text" value="fxmgr_tj2025_rQz91" />
+
+          <div>
+            <label>Position Mode</label>
+            <select id="position_mode">
+              <option value="one_way" selected>One_way Mode</option>
+              <option value="hedge">Hedge Mode</option>
+            </select>
+            <div class="hint small">Sadece test için, sinyale dahil edilir.</div>
+          </div>
         </div>
       </div>
 
-      <div class="grid g3" style="margin-top:12px">
+      <div class="grid g2" style="margin-top:12px">
         <div>
           <label>Entry Price (ops.)</label>
-          <input id="entry_price" type="number" step="0.01" value="1"/>
+          <input id="entry_price" type="number" step="0.01" placeholder="örn. 62000.5" />
         </div>
         <div>
           <label>Exit Price (ops.)</label>
-          <input id="exit_price" type="number" step="0.01" value="1"/>
+          <input id="exit_price"  type="number" step="0.01" placeholder="örn. 61500.0" />
         </div>
         <div>
           <label>Timestamp (ISO)</label>
           <input id="timestamp" type="text" />
           <div class="hint small">Şimdiki zaman için “Now”’a bas.</div>
+       </div>
+        <div>
+          <label>Fund Manager ID</label>
+          <input id="fund_manager_id" type="text" value="fxmgr_tj2025_rQz91" />
         </div>
       </div>
-
       <div style="margin:6px 0 10px" class="row">
         <strong>Zaman Modu:</strong>
         <label class="radio" style="margin-left:6px">
@@ -150,11 +235,13 @@
       <div style="height:6px"></div>
       <pre id="payloadOut">{}</pre>
       <div style="height:6px"></div>
-      <div><strong>Yanıt</strong> <span id="respBadge" class="pill">–</span></div>
+      <div><strong>Yanıt</strong>
+      <!--  <span id="respBadge" class="pill">–</span> -->
+      </div>
       <pre id="respOut">{}</pre>
     </div>
   </div>
 
-<script src="{{ url_for('static', path='js/admin_test.js') }}?v=20250821e" defer></script>
+<script src="{{ url_for('static', path='js/admin_test.js') }}?v=20250904c" defer></script>
 </body>
 </html>

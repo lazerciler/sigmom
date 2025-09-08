@@ -1,16 +1,5 @@
 // app/static/js/admin_referrals.js
-(function () {
-  var btn = document.getElementById('themeToggle');
-  if (!btn) return;              // buton yoksa sessizce çıkar
-  btn.addEventListener('click', function () {
-    var root = document.documentElement;
-    var isDark = root.classList.toggle('dark');
-    try { localStorage.setItem('theme', isDark ? 'dark' : 'light'); } catch(_) {}
-    //console.log('[toggle] dark=', isDark);
-  });
-})();
-
-// Generate form — CSV/ZIP seçimleri (CSP: inline yasak, bu yüzden buradan bağla)
+// Generate form — CSV/ZIP seçimleri (CSP: inline yasak, bu yüzden buradan bağlanır)
 (function () {
   const form = document.getElementById('gen-form');
   if (!form) return;

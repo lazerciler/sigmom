@@ -15,6 +15,16 @@
   const MIN_CAGR_DAYS = 21;      // don't show annual return for shorter spans
   const MAX_ANNUAL_PCT = 5000;   // cap display to +/- 5000% to avoid silly numbers
 
+  // CSS değişkenlerini oku (fallback'li)
+  const css = getComputedStyle(document.documentElement);
+  const getVar = (name, fb) => (css.getPropertyValue(name).trim() || fb);
+
+  const gridC = getVar('--chart-grid', 'rgba(148,163,184,.25)');
+  const axisC = getVar('--chart-axis', 'rgba(148,163,184,.40)');
+  const fontC = getVar('--chart-font', '#cbd5e1');
+  const ttBg  = getVar('--chart-tt-bg', 'rgba(2,6,23,.96)');
+  const ttBd  = getVar('--chart-tt-bd', axisC);
+
   // ---- Access gate (frontend UX) ----
   function checkEquityAllowed() {
     if (typeof window.EQUITY_ALLOWED === 'boolean') return window.EQUITY_ALLOWED;
@@ -197,18 +207,35 @@
       options: {
         responsive: true,
         maintainAspectRatio: false,
+        devicePixelRatio: () => window.devicePixelRatio || 1,
         scales: {
-          x: { type: "time", time: { tooltipFormat: "DD.MM.YYYY HH:mm" } },
-          y: { ticks: { callback: (v) => nf2.format(v) } },
+          x: {
+            type: "time",
+            time: { tooltipFormat: "DD.MM.YYYY HH:mm" },
+            grid:   { color: gridC, borderColor: axisC },
+            ticks:  { color: fontC },
+            border: { color: axisC }
+          },
+          y: {
+            grid:   { color: gridC, borderColor: axisC },
+            ticks:  { color: fontC },
+            border: { color: axisC }
+          }
         },
         plugins: {
+          legend: { labels: { color: fontC } },
           tooltip: {
-            mode: "nearest",
-            intersect: false,
-            callbacks: {
-              title: (items) =>
-                items?.[0]?.parsed?.x
-                  ? new Date(items[0].parsed.x).toLocaleString(LOCALE)
+          backgroundColor: ttBg,
+          borderColor: ttBd,
+          borderWidth: 1,
+          // titleColor: fontC,
+          //bodyColor:  fontC,
+          mode: "nearest",
+          intersect: false,
+          callbacks: {
+            title: (items) =>
+              items?.[0]?.parsed?.x
+                ? new Date(items[0].parsed.x).toLocaleString(LOCALE)
                   : "",
               label: (ctx) => `Balance: ${nf2.format(ctx.parsed.y)}`,
             },
@@ -231,7 +258,6 @@
     }
   }
 
-  // --- Sinyallerden aktif sembolü çıkar (sabit/gömme yok) ---
   async function resolveActiveSymbol() {
     // 1) Açık pozisyonlardan
     try {

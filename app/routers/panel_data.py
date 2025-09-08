@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 # app/routers/panel_data.py
 # Python 3.9
-from typing import Dict, List, Optional, Literal, Sequence
+from decimal import Decimal
+from typing import Dict, Any, Tuple, List, Optional, Literal, Sequence
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, Query, HTTPException
+from app.config import settings
+from app.utils.exchange_loader import load_execution_module
 import importlib
 import inspect
 from pydantic import BaseModel
@@ -14,6 +17,13 @@ from app.database import get_db
 from app.models import StrategyOpenTrade, StrategyTrade, RawSignal
 
 router = APIRouter(prefix="/api/me", tags=["me"])
+
+
+def _to_dec(x: Any) -> Decimal:
+    try:
+        return Decimal(str(x))
+    except Exception:
+        return Decimal("0")
 
 
 # ---------- Yardımcılar ----------
@@ -97,10 +107,8 @@ async def symbols_public(
 
 @router.get("/markers", response_model=List[Marker])
 async def markers_public(
-    symbols: Optional[str] = Query(
-        None, description="Virgülle ayrılmış semboller (örn: BTCUSDT,ETHUSDT)"
-    ),
-    tf: Optional[str] = Query(None, description="Timeframe: 1m,5m,15m,1h,4h,1d"),
+    symbol: Optional[str] = Query(None, description="Tek sembol. Örn: BTCUSDT"),
+    tf: str = Query(..., description="Timeframe: 1m,5m,15m,1h,4h,1d"),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -110,13 +118,15 @@ async def markers_public(
     - Kapanmış işlemler:
     (strategy_trades) -> aynı open_trade_public_id için EN SON kapanış + eşleşen açılış -> OPEN+CLOSE
     """
-    # --- sembol filtresi ---
+    # --- sembol filtresi (tekil) ---
     sym_list: Optional[Sequence[str]] = None
-    if symbols:
-        sym_list = [s.strip().upper() for s in symbols.split(",") if s.strip()]
+    if symbol:
+        sym_list = [symbol.strip().upper()]
 
     markers: List[Marker] = []
-    bar_sec = TF_TO_SEC.get(tf) if tf else None
+    bar_sec = TF_TO_SEC.get(tf)
+    if not bar_sec:
+        raise HTTPException(status_code=400, detail=f"Geçersiz tf: {tf}")
 
     # === 1) Hâlâ açık pozisyonlar -> OPEN ===
     q_open = select(StrategyOpenTrade).where(
@@ -131,7 +141,7 @@ async def markers_public(
         is_long = side == "long"
         pos = "belowBar" if is_long else "aboveBar"
         t = _to_epoch(r.timestamp)
-        tb = (t - (t % bar_sec)) if bar_sec else t
+        tb = t - (t % bar_sec)
         markers.append(
             Marker(
                 symbol=str(r.symbol),
@@ -146,8 +156,8 @@ async def markers_public(
                     if side in ("long", "short")
                     else None
                 ),
-                time_bar=tb if bar_sec else None,
-                is_live=True,
+                time_bar=tb,  # her zaman dolu
+                is_live=False,  # canlı muma pin yok
             )
         )
 
@@ -187,7 +197,7 @@ async def markers_public(
             is_long_o = side_o == "long"
             pos = "belowBar" if is_long_o else "aboveBar"
             t0 = _to_epoch(sot.timestamp)
-            tb0 = (t0 - (t0 % bar_sec)) if bar_sec else t0
+            tb0 = t0 - (t0 % bar_sec)
             markers.append(
                 Marker(
                     symbol=str(sot.symbol),
@@ -202,7 +212,7 @@ async def markers_public(
                         if side_o in ("long", "short")
                         else None
                     ),
-                    time_bar=tb0 if bar_sec else None,
+                    time_bar=tb0,
                     is_live=False,
                 )
             )
@@ -211,7 +221,7 @@ async def markers_public(
         side_c = str(getattr(t, "side", "")).lower() if hasattr(t, "side") else ""
         is_long_c = side_c == "long"
         tc = _to_epoch(t.timestamp)
-        tbc = (tc - (tc % bar_sec)) if bar_sec else tc
+        tbc = tc - (tc % bar_sec)
         markers.append(
             Marker(
                 symbol=str(t.symbol),
@@ -226,7 +236,7 @@ async def markers_public(
                     if side_c in ("long", "short")
                     else None
                 ),
-                time_bar=tbc if bar_sec else None,
+                time_bar=tbc,
             )
         )
 
@@ -390,12 +400,13 @@ async def overview_public(
 
 
 # Bakiye (borsa-agnostik) — iş mantığı account.py’de
-
-
 @router.get("/balance")
 async def me_balance(
+    # exchange: str = Query(settings.DEFAULT_EXCHANGE, description=f"{settings.DEFAULT_EXCHANGE}"),
     exchange: str = Query(
-        "binance_futures_testnet", description="örn. binance_futures_testnet"
+        settings.DEFAULT_EXCHANGE,
+        description=f"Varsayılan: {settings.DEFAULT_EXCHANGE} · Örn: binance_futures_testnet",
+        example=settings.DEFAULT_EXCHANGE,  # /docs’ta tek örnek gösterir
     ),
     asset: Optional[str] = Query(None, description="USDT, USDC, FDUSD, BTC..."),
     symbol: Optional[str] = Query(
@@ -404,7 +415,12 @@ async def me_balance(
     currency: Optional[str] = Query(
         None, description="Sinyal JSON 'currency' alanı (varsa öncelikli)"
     ),
-    all: bool = Query(False, description="Tüm bakiyeleri ham liste olarak döndür"),
+    # all: bool = Query(False, description="Tüm bakiyeleri ham liste olarak döndür"),
+    return_all: bool = Query(
+        False,
+        alias="all",  # URL'de ?all=true/1 kalır; Python tarafında return_all
+        description="Tüm bakiyeleri ham liste olarak döndür (query key'i: all)",
+    ),
 ):
     try:
         mod = importlib.import_module(f"app.exchanges.{exchange}.account")
@@ -415,27 +431,269 @@ async def me_balance(
             raise RuntimeError(f"{exchange}.account içinde get_available(...) yok")
         if inspect.iscoroutinefunction(fn):
             return await fn(
-                asset=asset, symbol=symbol, currency=currency, return_all=all
+                asset=asset, symbol=symbol, currency=currency, return_all=return_all
             )
         # Sync implementasyon varsa:
-        return fn(asset=asset, symbol=symbol, currency=currency, return_all=all)
+        return fn(asset=asset, symbol=symbol, currency=currency, return_all=return_all)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
+def _normalize_upnl(raw: Any) -> Tuple[Decimal, Decimal, Decimal]:
+    """
+    raw -> (total, long, short)
+    Kabul edilen olası şekiller:
+      - sayı: toplam
+      - {"unrealized": n, "legs": {"long": a, "short": b}}
+      - {"long": a, "short": b}
+      - [{"side": "LONG"/"SHORT", "unrealizedPnl" | "u_pnl" | "unrealized" | "pnl": v}, ...]
+    """
+    total = Decimal("0")
+    long_amt = Decimal("0")
+    short_amt = Decimal("0")
+
+    if raw is None:
+        return total, long_amt, short_amt
+
+    # 1) Basit sayı
+    if isinstance(raw, (int, float, str, Decimal)):
+        total = _to_dec(raw)
+        return total, long_amt, short_amt
+
+    # 2) Sözlük
+    if isinstance(raw, dict):
+        # {"unrealized": n, "legs": {...}}
+        if "unrealized" in raw:
+            total = _to_dec(raw.get("unrealized"))
+            legs = raw.get("legs") or {}
+            if isinstance(legs, dict):
+                long_amt = _to_dec(legs.get("long", 0))
+                short_amt = _to_dec(legs.get("short", 0))
+            else:
+                # bazen doğrudan {"long":..,"short":..} da gelebilir
+                long_amt = _to_dec(raw.get("long", 0))
+                short_amt = _to_dec(raw.get("short", 0))
+
+            # Positions / rows vb. listeden L/S yeniden hesapla
+            items = None
+            for _k in ("positions", "data", "rows", "items"):
+                _v = raw.get(_k)
+                if isinstance(_v, list):
+                    items = _v
+                    break
+            if items:
+                ll = Decimal("0")
+                ss = Decimal("0")
+                for it in items:
+                    if not isinstance(it, dict):
+                        continue
+                    side = str(
+                        it.get("side")
+                        or it.get("positionSide")
+                        or it.get("posSide")
+                        or it.get("ps")
+                        or ""
+                    ).lower()
+                    v = (
+                        it.get("unrealizedPnl")
+                        or it.get("unRealizedProfit")
+                        or it.get("u_pnl")
+                        or it.get("unrealized")
+                        or it.get("upnl")
+                        or it.get("pnl")
+                        or 0
+                    )
+                    dv = _to_dec(v)
+                    if side.startswith("long") or side == "l":
+                        ll += dv
+                    elif side.startswith("short") or side == "s":
+                        ss += dv
+
+                # Listeden gelen veri tutarlıysa legs'i komple güncelle
+                if ll != 0 or ss != 0:
+                    long_amt, short_amt = ll, ss
+                    total = long_amt + short_amt
+
+            if not (long_amt or short_amt):
+                # fallback: ayrı anahtar yoksa, total’ı tek bacak varsay
+                long_amt = total
+            return total, long_amt, short_amt
+
+        # {"long": a, "short": b}
+        if ("long" in raw) or ("short" in raw):
+            long_amt = _to_dec(raw.get("long", 0))
+            short_amt = _to_dec(raw.get("short", 0))
+            total = long_amt + short_amt
+            return total, long_amt, short_amt
+
+        # {"positions":[...]} benzeri → sadece **liste** olan key’i al
+        items = None
+        for _k in ("positions", "data", "rows", "items"):
+            _v = raw.get(_k)
+            if isinstance(_v, list):
+                items = _v
+                break
+        raw = items if items is not None else raw  # liste yoksa aynen devam
+
+    # 3) Liste
+    if isinstance(raw, list):
+        for it in raw:
+            if not isinstance(it, dict):
+                total += _to_dec(it)
+                continue
+            # side = str(it.get("side", "")).lower()
+            # v = (it.get("unrealizedPnl") or it.get("u_pnl")
+            #      or it.get("unrealized") or it.get("pnl") or 0)
+
+            # Side: Binance vb. 'positionSide'/'posSide' da kullanabilir
+            side = str(
+                it.get("side")
+                or it.get("positionSide")
+                or it.get("posSide")
+                or it.get("ps")
+                or ""
+            ).lower()
+            # Değer: 'unRealizedProfit' dahil yaygın alias'ları tara
+            v = (
+                it.get("unrealizedPnl")
+                or it.get("unRealizedProfit")
+                or it.get("u_pnl")
+                or it.get("unrealized")
+                or it.get("upnl")
+                or it.get("pnl")
+                or 0
+            )
+
+            dv = _to_dec(v)
+            total += dv
+            if side.startswith("long"):
+                long_amt += dv
+            elif side.startswith("short"):
+                short_amt += dv
+        return total, long_amt, short_amt
+
+    # tanınmayan şekil → sadece toplamı almaya çalış
+    return _to_dec(raw), long_amt, short_amt
+
+
 @router.get("/unrealized")
 async def me_unrealized(
-    exchange: str = Query("binance_futures_testnet"),
+    exchange: str = Query(settings.DEFAULT_EXCHANGE),
     symbol: Optional[str] = Query(None),
-    all: bool = Query(False),
+    return_all: bool = Query(
+        False,
+        alias="all",
+        description="Ham çıktıyı döndür (debug). Varsayılan: normalize + legs breakdown.",
+    ),
 ):
+    """
+    Döndürür:
+      {
+        "unrealized": <float>,                 # toplam (L+S)
+        "legs": {"long": <float>, "short": <float>},
+        "mode": "one_way" | "hedge"
+      }
+    ?all=1 verilirse borsa modülünün ham çıktısı aynen döner.
+    """
     try:
         mod = importlib.import_module(f"app.exchanges.{exchange}.account")
         fn = getattr(mod, "get_unrealized", None)
         if not callable(fn):
             raise RuntimeError(f"{exchange}.account içinde get_unrealized(...) yok")
+
         if inspect.iscoroutinefunction(fn):
-            return await fn(symbol=symbol, return_all=all)
-        return fn(symbol=symbol, return_all=all)
+            raw = await fn(symbol=symbol, return_all=return_all)
+        else:
+            raw = fn(symbol=symbol, return_all=return_all)
+
+        if return_all:
+            return raw
+
+        total, long_amt, short_amt = _normalize_upnl(raw)
+
+        # moddan pozisyon modu (varsa) oku; yoksa varsayılan
+        try:
+            ex = load_execution_module(exchange)
+            mode = getattr(
+                getattr(ex, "order_handler", None), "POSITION_MODE", "one_way"
+            )
+        except Exception:
+            mode = "one_way" if (short_amt == 0) else "hedge"  # kaba tahmin
+
+        return {
+            "unrealized": float(total),
+            "legs": {"long": float(long_amt), "short": float(short_amt)},
+            "mode": mode,
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# ------------------------- Net PnL (borsa-onaylı) ---------------------------
+@router.get("/netpnl")
+async def me_netpnl(
+    exchange: str = Query(settings.DEFAULT_EXCHANGE),
+    symbol: Optional[str] = Query(None),
+    since_days: Optional[int] = Query(None, ge=1, le=3650),
+    since_epoch: Optional[int] = Query(None, description="Unix saniye"),
+    db: AsyncSession = Depends(get_db),
+):
+    ex = exchange
+    sym = symbol.upper() if symbol else None
+    now = datetime.now(timezone.utc)
+
+    # 1) Zaman penceresi: parametre varsa öncelik ver
+    since_dt: Optional[datetime] = None
+    if since_epoch is not None:
+        since_dt = datetime.fromtimestamp(int(since_epoch), tz=timezone.utc)
+    elif since_days is not None:
+        since_dt = now - timedelta(days=int(since_days))
+    else:
+        # 2) Aksi halde DB'deki İLK işlem zamanını bul (closed ve open tablolarından min)
+        q_closed = select(func.min(StrategyTrade.timestamp)).where(
+            StrategyTrade.exchange == ex
+        )
+        q_opened = select(func.min(StrategyOpenTrade.timestamp)).where(
+            StrategyOpenTrade.exchange == ex
+        )
+        if sym:
+            q_closed = q_closed.where(func.upper(StrategyTrade.symbol) == sym)
+            q_opened = q_opened.where(func.upper(StrategyOpenTrade.symbol) == sym)
+
+        t_closed = (await db.execute(q_closed)).scalar()
+        t_opened = (await db.execute(q_opened)).scalar()
+        since_dt = min([t for t in (t_closed, t_opened) if t], default=None)
+
+    # Hiç işlem yoksa 0 dön (fallback)
+    if since_dt is None:
+        return {
+            "net": 0.0,
+            "window": {"since": None, "until": now.isoformat()},
+            "exchange": ex,
+            "symbol": sym,
+            "source": "exchange-income",
+        }
+
+    # 3) Borsa onaylı gelirleri topla (income_summary)
+    try:
+        mod = importlib.import_module(f"app.exchanges.{ex}.account")
+        fn = getattr(mod, "income_summary", None)
+        if not callable(fn):
+            raise RuntimeError(f"{ex}.account içinde income_summary(...) yok")
+
+        if inspect.iscoroutinefunction(fn):
+            total = await fn(symbol=sym, since=since_dt, until=None)
+        else:
+            total = fn(symbol=sym, since=since_dt, until=None)
+
+        total = float(total or 0)
+        return {
+            "net": total,
+            "window": {"since": since_dt.isoformat(), "until": now.isoformat()},
+            "exchange": ex,
+            "symbol": sym,
+            "source": "exchange-income",
+        }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

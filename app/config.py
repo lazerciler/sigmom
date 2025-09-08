@@ -43,12 +43,17 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str = Field(..., env="GOOGLE_CLIENT_ID")
     GOOGLE_CLIENT_SECRET: str = Field(..., env="GOOGLE_CLIENT_SECRET")
     GOOGLE_REDIRECT_URI: str = Field(
-        "http://localhost:8000/auth/google/callback", env="GOOGLE_REDIRECT_URI"
+        "http://localhost:8000/auth/google/callback",
+        env="GOOGLE_REDIRECT_URI",
+        # "https://localhost:8000/auth/google/callback", env="GOOGLE_REDIRECT_URI"
     )
-    ADMIN_EMAILS: str = Field("", env="ADMIN_EMAILS")
+    ADMIN_EMAIL_WHITELIST: str = Field("", env="ADMIN_EMAIL_WHITELIST")
 
     # Session Secret
     SESSION_SECRET: str = Field(..., env="SESSION_SECRET")
+
+    # Allowed fund managers
+    ALLOWED_FUND_MANAGER_IDS: str = Field("", env="ALLOWED_FUND_MANAGER_IDS")
 
     @validator("SESSION_SECRET")
     def validate_session_secret(cls, v: str) -> str:
@@ -59,6 +64,12 @@ class Settings(BaseSettings):
     @property
     def active_exchanges(self) -> List[str]:
         return [ex.strip() for ex in self.ACTIVE_EXCHANGES.split(",") if ex.strip()]
+
+    @property
+    def allowed_fund_manager_ids(self) -> List[str]:
+        return [
+            x.strip() for x in self.ALLOWED_FUND_MANAGER_IDS.split(",") if x.strip()
+        ]
 
     @root_validator(pre=True)
     def validate_default_exchange(cls, values):

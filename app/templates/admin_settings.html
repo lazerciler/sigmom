@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="tr" class="{% if request.cookies.get('theme') == 'dark' %}dark{% endif %}">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Admin • Settings</title>
+
+  <!-- Theme Boot -->
+  <script src="{{ url_for('static', path='js/theme_boot.js') }}?v=1a"></script>
+  <!-- Tailwind (projedeki build) -->
+  <link rel="stylesheet" href="{{ url_for('static', path='css/tw.css') }}?v=4l">
+
+  <style>
+    .badge{display:inline-flex;align-items:center;justify-content:center;
+      height:1.75rem;padding:0 .5rem;border-radius:.5rem;border-width:1px}
+  </style>
+</head>
+
+<body class="bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-100">
+  <main class="max-w-5xl mx-auto p-6 space-y-8">
+
+    <!-- Başlık -->
+    <header class="px-6 py-4 border-b bg-white dark:bg-slate-800 dark:border-slate-700 rounded-xl
+                   flex items-center justify-between">
+      <div>
+        <h1 class="text-2xl font-semibold">Yönetici Ayarları</h1>
+        <p class="text-sm text-slate-500 dark:text-slate-400">
+          ⏻
+          <strong>{{ me_name or (me.name or me.email) }}</strong>
+        </p>
+      </div>
+      <a href="/" title="Panel Ana Sayfa">
+            <button id="home"
+              class="h-8 w-8 rounded-lg border border-slate-300 dark:border-slate-600">🌎</button>
+      </a>
+      <a href="/admin/test" title="Webhook Test Paneli">
+            <button id="test"
+              class="h-8 w-8 rounded-lg border border-slate-300 dark:border-slate-600">📡</button>
+      </a>
+      <a href="/admin/referrals" title="Referans Yönetimi">
+            <button id="referral"
+              class="h-8 w-8 rounded-lg border border-slate-300 dark:border-slate-600">🏛️</button>
+      </a>
+      <button id="themeToggle"
+              class="h-8 w-8 rounded-lg border border-slate-300 dark:border-slate-600">🌓</button>
+    </header>
+
+    <!-- Kullanıcı Tablosu -->
+    <section class="bg-white dark:bg-slate-800 rounded-xl shadow p-5">
+      <div class="overflow-x-auto">
+        <table class="min-w-full text-sm">
+          <thead class="text-slate-500 dark:text-slate-300 border-b border-slate-200 dark:border-slate-700">
+            <tr>
+              <th class="py-2 pr-3 text-left">ID</th>
+              <th class="py-2 pr-3 text-left">Ad</th>
+              <th class="py-2 pr-3 text-left">Email</th>
+              <th class="py-2 pr-3 text-left">Rol</th>
+              <th class="py-2 text-left">İşlem</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for u in users %}
+            {% set is_admin = (u.role == 'admin') %}
+            {% set is_self  = (u.id == me_id) %}
+            <tr id="u-{{ u.id }}" class="border-b border-slate-100 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/40">
+              <td class="py-2 pr-3">{{ u.id }}</td>
+              <td class="py-2 pr-3">{{ u.name or '—' }}</td>
+              <td class="py-2 pr-3">{{ u.email }}</td>
+
+              <td class="py-2 pr-3 role">
+                {% if is_admin %}
+                  <span class="badge bg-emerald-100 text-emerald-700 border-emerald-300
+                               dark:bg-emerald-700/20 dark:text-emerald-300 dark:border-emerald-600/40">admin</span>
+                {% else %}
+                  <span class="badge bg-slate-100 text-slate-700 border-slate-300
+                               dark:bg-slate-700/30 dark:text-slate-200 dark:border-slate-600/40">user</span>
+                {% endif %}
+              </td>
+
+              <td class="py-2 space-x-2">
+                <!-- Admin yap -->
+                <button
+                  class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-600 text-sm role-btn
+                         hover:bg-slate-100 dark:hover:bg-slate-700"
+                  data-user-id="{{ u.id }}"
+                  data-email="{{ u.email }}"
+                  data-target="admin"
+                  {% if is_admin %}disabled title="Zaten admin"{% endif %}
+                  onclick="return confirmRoleChange(this)">
+                  Admin yap
+                </button>
+
+                <!-- User yap -->
+                <button
+                  class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-600 text-sm role-btn
+                         hover:bg-slate-100 dark:hover:bg-slate-700"
+                  data-user-id="{{ u.id }}"
+                  data-email="{{ u.email }}"
+                  data-target="user"
+                  {% if not is_admin or is_self %}disabled
+                     title="{% if is_self %}Kendinizi düşüremezsiniz{% else %}Zaten user{% endif %}"
+                  {% endif %}
+                  onclick="return confirmRoleChange(this)">
+                  User yap
+                </button>
+              </td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Küçük toast/mesaj -->
+    <div id="toast"
+         class="fixed bottom-5 right-5 hidden px-4 py-2 rounded-lg text-sm
+                bg-slate-900 text-white/90 shadow-lg"></div>
+  </main>
+
+  <!-- Toggle  -->
+  <script src="{{ url_for('static', path='js/theme_toggle.js') }}?v=1a"></script>
+
+  <script>
+    // ---- JS yardımcılar ----
+    function normEmail(e){
+      e=(e||"").trim().toLowerCase();
+      const at=e.indexOf("@"); if(at<0) return e;
+      let local=e.slice(0,at), domain=e.slice(at+1);
+      if(domain==="gmail.com" || domain==="googlemail.com"){
+        local=local.split("+",1)[0].replace(/\./g,""); domain="gmail.com";
+      }
+      return local+"@"+domain;
+    }
+    const ADMIN_WL = new Set({{ (admin_wl or []) | tojson | safe }});
+    const ME_ID = {{ me_id or 0 }};
+
+    function toast(msg){
+      const el=document.getElementById('toast');
+      el.textContent=msg; el.classList.remove('hidden');
+      setTimeout(()=>el.classList.add('hidden'), 2000);
+    }
+
+    async function changeRole(uid, role){
+      const fd=new FormData();
+      fd.append('user_id', uid);
+      fd.append('role', role);
+      const res=await fetch('/admin/settings/role', {method:'POST', body:fd, credentials:'include'});
+      const j=await res.json();
+      if(!res.ok){ alert(j.detail || 'Hata'); throw new Error('role-change'); }
+      // Rozeti güncelle
+      const row=document.getElementById('u-'+uid);
+      const roleCell=row?.querySelector('.role');
+      if(roleCell){
+        const span=document.createElement('span');
+        span.className = (j.role==='admin')
+          ? 'badge bg-emerald-100 text-emerald-700 border-emerald-300 dark:bg-emerald-700/20 dark:text-emerald-300 dark:border-emerald-600/40'
+          : 'badge bg-slate-100 text-slate-700 border-slate-300 dark:bg-slate-700/30 dark:text-slate-200 dark:border-slate-600/40';
+        span.textContent=j.role;
+        roleCell.innerHTML=''; roleCell.appendChild(span);
+      }
+      // Butonları yeniden ayarla
+      const adminBtn=row.querySelector('[data-target="admin"]');
+      const userBtn =row.querySelector('[data-target="user"]');
+      const email   =row.querySelector('[data-target]')?.dataset.email || '';
+      const wh = ADMIN_WL.has(normEmail(email));
+      if(adminBtn) { adminBtn.disabled = (j.role==='admin'); adminBtn.title = adminBtn.disabled ? 'Zaten admin' : ''; }
+      if(userBtn)  {
+        userBtn.disabled = (j.role!=='admin') || (uid===ME_ID) || wh;
+        userBtn.title = userBtn.disabled
+                        ? ((uid===ME_ID) ? 'Kendinizi düşüremezsiniz'
+                           : (wh ? 'Beyaz listedeki admin düşürülemez' : 'Zaten user'))
+                        : '';
+      }
+      toast('Rol güncellendi: #' + uid + ' → ' + j.role);
+      return j;
+    }
+
+    function confirmRoleChange(btn){
+      const target = btn.dataset.target; // 'admin' | 'user'
+      const uid = Number(btn.dataset.userId);
+      const email = btn.dataset.email;
+      if(target==='user'){
+        if(uid===ME_ID){ alert('Kendinizi düşüremezsiniz.'); return false; }
+        if(ADMIN_WL.has(normEmail(email))){ alert('Beyaz listedeki admin düşürülemez.'); return false; }
+        if(!confirm(`'${email}' kullanıcısını USER yapacaksınız. Onaylıyor musunuz?`)) return false;
+      }else{
+        if(!confirm(`'${email}' kullanıcısını ADMIN yapacaksınız. Onaylıyor musunuz?`)) return false;
+      }
+      changeRole(uid, target).catch(()=>{});
+      return false; // tıklamayı tüket
+    }
+
+    // Sayfa yüklenince whitelist’e göre "User yap" butonlarını da kilitle
+    window.addEventListener('DOMContentLoaded', () => {
+      document.querySelectorAll('[data-target="user"]').forEach(btn=>{
+        const uid=Number(btn.dataset.userId);
+        const email=btn.dataset.email;
+        if(ADMIN_WL.has(normEmail(email))){
+          btn.disabled = true;
+          btn.title = 'Beyaz listedeki admin düşürülemez';
+        }
+      });
+    });
+  </script>
+</body>
+</html>

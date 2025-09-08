@@ -19,6 +19,27 @@ dialog#ref-modal { padding: 0; border: 0; }
 dialog#ref-modal[open] { position: fixed; inset: 0; margin: auto; }
 dialog#ref-modal::backdrop { background: rgba(0,0,0,0.5); }
 
+.loader {
+  border: 1px solid #f3f3f3;
+  border-radius: 50%;
+  border-top: 1px solid #3498db;
+  width: 12px;
+  height: 12px;
+  -webkit-animation: spin 2s linear infinite; /* Safari */
+  animation: spin 0.8s linear infinite;
+}
+
+/* Safari */
+@-webkit-keyframes spin {
+  0% { -webkit-transform: rotate(0deg); }
+  100% { -webkit-transform: rotate(360deg); }
+}
+
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
 /* Kapanan işlemler scroll (dark uyumlu) */
 #recent-trades{
   max-height: 16rem;          /* 12rem/20rem */
@@ -79,7 +100,82 @@ dialog#ref-modal::backdrop { background: rgba(0,0,0,0.5); }
   background-color: var(--sb-thumb);   /* hover’da biraz daha belirgin */
 }
 
-
 /* Dark temayı tabanda zorla: Tailwind sırası değişse de gövde koyu kalsın */
-html.dark { color-scheme: dark; }
-html.dark body { background: #0f172a; color: #e2e8f0; } /* slate-900 / slate-200 */
+/* html.dark { color-scheme: dark; } */
+/* html.dark body { background: #0f172a; color: #e2e8f0; } */ /* slate-900 / slate-200 */
+
+/* Chart.js renk değişkenleri */
+:root{
+  --chart-grid: rgba(100,116,139,.22);   /* light: slate-500 ~ %22 opak */
+  --chart-axis: rgba(100,116,139,.38);
+  --chart-font: #334155;                 /* slate-700 */
+  --chart-tt-bg: rgba(2,6,23,.96);       /* tooltip bg (almost-black) */
+  --chart-tt-bd: rgba(100,116,139,.35);  /* tooltip border */
+}
+
+.dark{
+  --chart-grid: rgba(148,163,184,.29);   /* dark: slate-400 ~ biraz daha açık */
+  --chart-axis: rgba(148,163,184,.45);
+  --chart-font: #75818F;                 /* slate-200 */
+  --chart-tt-bg: rgba(2,6,23,.96);
+  --chart-tt-bd: rgba(148,163,184,.45);
+}
+
+/* Özel genişlik sınıfı */
+  .max-w-custom {
+    max-width: 98rem; /* 1 rem = 16px Örnek: 1400px; */
+}
+
+/* Custom tooltip */
+        .tooltip {
+            position: relative;
+            display: inline-block;
+            cursor: pointer;
+        }
+
+        .tooltip .tooltiptext {
+            visibility: hidden;
+            width: 220px;
+            background-color: rgb(47, 59, 81, 0.85); /* rgba(0, 0, 0, 0.80); */
+            color: #e2e6e9;
+            text-align: left;
+            border-radius: 6px;
+            padding: 8px 10px;
+            position: absolute;
+            z-index: 1;
+            bottom: 150%;
+            left: 50%;
+            margin-left: -60px;
+        }
+
+        .tooltip .tooltiptext::after {
+            content: "";
+            position: absolute;
+            top: 100%;
+            left: 50%;
+            margin-left: -5px;
+        }
+
+        .tooltip:hover .tooltiptext {
+            visibility: visible;
+        }
+
+        body {
+         /*   font-family: Arial, sans-serif; */
+            padding: 40px;
+            line-height: 1.6;
+        }
+
+        .circle-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 13px;
+            height: 13px;
+            border-radius: 50%;
+            background-color: rgb(40, 89, 134, 0.80);
+            color: white;
+          /*  font-weight: bold; */
+            font-size: 9px;
+            cursor: pointer;
+        }

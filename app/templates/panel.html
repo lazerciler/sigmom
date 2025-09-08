@@ -1,11 +1,13 @@
-<!doctype html>
-<html lang="tr" class="dark">
+<!doctype html><!-- app/templates/panel.html -->
+<html lang="tr" class="{% if request.cookies.get('theme') == 'dark' %}dark{% endif %}"
+      data-trades-allowed="{{ (user is not none) | tojson }}"
+      data-equity-allowed="{{ (referral_verified | default(false)) | tojson }}">
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>SIGMOM • Panel</title>
-  <!-- Dark mode ve Tailwind config -->
-  <script src="{{ url_for('static', path='js/panel_head.js') }}?v=4g"></script>
+  <title>Sigmom • SAI Panel</title>
+  <!-- Theme Boot -->
+  <script src="{{ url_for('static', path='js/theme_boot.js') }}?v=1a"></script>
   <!-- Tailwind -->
   <link rel="stylesheet" href="{{ url_for('static', path='css/tw.css') }}?v=4f">
   <!-- Extras -->
@@ -19,21 +21,40 @@
     <div class="max-w-7xl mx-auto px-4 lg:px-6 h-14 flex items-center justify-between">
       <div class="flex items-center gap-3">
         <span class="h-6 w-6 rounded bg-indigo-600 text-white grid place-items-center text-xs font-semibold">S</span>
-        <span class="text-sm font-medium text-slate-500 dark:text-slate-400">Sigmom Panel</span>
+        <span class="text-sm font-medium text-slate-500 dark:text-slate-400">Panel</span>
       </div>
 
       <div class="flex items-center gap-3">
-        <!-- Tema: tek buton -->
-        <button data-theme-toggle
+
+        <!-- Tema butonu -->
+        <!--
+        <button data-theme-data-theme-toggle toggle id="themeToggle"
                 class="h-8 w-8 rounded-lg border border-slate-300 dark:border-slate-600">🌓</button>
+        -->
+
+        <button id="themeToggle" type="button"
+                class="h-8 w-8 rounded-lg border border-slate-300 dark:border-slate-600 grid place-items-center"
+                aria-label="Tema değiştir"
+                title="Tema değiştir 🌓">
+            🌓
+        </button>
+
+{% if user and user.role == 'admin' %}
+<a href="/admin/settings" target="_blank" rel="noopener"
+   class="h-8 w-8 rounded-lg border border-slate-300 dark:border-slate-600 grid place-items-center"
+   aria-label="Yönetici ayarları"
+   title="Yönetici ayarları ⚙">
+  ⚙
+</a>
+{% endif %}
 
         {% if user %}
           {% if referral_verified %}
-            <span id="role-chip" class="chip bg-emerald-50 dark:bg-emerald-900/20 border-emerald-300/50 text-emerald-700 dark:text-emerald-300">Asil Üye</span>
+            <span id="role-chip" class="chip bg-emerald-50 dark:bg-emerald-900/20 border-emerald-300/50 text-emerald-700 dark:text-emerald-300">Asil üye</span>
           {% else %}
-            <span id="role-chip" class="chip bg-amber-50 dark:bg-amber-900/20 border-amber-300/50 text-amber-700 dark:text-amber-300">Standart Üye</span>
+            <span id="role-chip" class="chip bg-amber-50 dark:bg-amber-900/20 border-amber-300/50 text-amber-700 dark:text-amber-300">Standart üye</span>
           {% endif %}
-          <div class="text-sm hidden sm:block">Merhaba, {{ user.name or user.email }}</div>
+          <div class="text-sm hidden sm:block">⏻ {{ user.name or user.email }}</div>
           <a href="/auth/google/logout"
              class="h-9 px-3 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 transition
                     dark:border-slate-600 dark:text-slate-100 dark:hover:bg-slate-800
@@ -67,12 +88,13 @@
                 <button class="chip" data-tf="4h">4h</button>
                 <button class="chip" data-tf="1d">1d</button>
               </div>
-              <span id="feed-status" class="chip bg-slate-100 dark:bg-slate-800/60">Bağlantı: —</span>
+              <span id="feed-status" class="chip bg-slate-100 dark:bg-slate-800/60"><div class="loader"></div></span>
             </div>
           </div>
           <div id="chart" class="h-[380px] sm:h-[440px] min-h-[260px]"></div>
           <div id="data-disclaimer" class="px-4 py-2 text-[11px] text-slate-500 dark:text-slate-400 border-t border-slate-200 dark:border-slate-700">
-            SAI (Signal Alert Interface)
+          {{ 'Veriler gecikmelidir; **bu bir hata değil, gürültü filitreleme ve grafik stabilizasyonu içindir.**' if referral_verified and user else
+            'Veriler gecikmelidir; **grafik referans amaçlı olup yatırım tavsiyesi değildir.**' }}
           </div>
         </div>
       </div>
@@ -80,64 +102,119 @@
       <!-- Sağ panel -->
       <aside class="lg:col-span-4">
         <div class="card shadow-sm p-4">
-          <h3 class="text-sm font-semibold mb-3">Durum</h3>
+      {% if not referral_verified %}
+          <h3 class="text-sm font-semibold mb-3">ℹ Statü</h3>
 
           <dl class="text-sm grid grid-cols-3 gap-y-2">
-            <dt class="col-span-1 text-slate-500">Hesap sahibi</dt>
-            <dd class="col-span-2 truncate text-right">{{ user.name or user.email if user else '⚠ Ziyaretçi' }}</dd>
+            <dt class="col-span-1 text-slate-500">Hesap</dt>
+            <dd class="col-span-2 truncate text-right">{% if user and referral_verified %}
+              🏆 Asil üyesiniz {% elif user %}
+              Standart üyelik{% else %}
+              ⚠ Ziyaretçi{% endif %}</dd>
+            </dd>
             <dt class="col-span-1 text-slate-500">Erişim</dt>
             <dd id="access-level" class="col-span-2 text-right">{% if user and referral_verified %}
-              Asil (tam){% elif user %}
-              Standart (kısıtlı){% else %}
+              Tüm özellikler {% elif user %}
+              Stantart özellikler{% else %}
               Misafir{% endif %}</dd>
             <dt class="col-span-1 text-slate-500">Referans</dt>
                <dd class="col-span-2 text-right">{% if referral_verified %}
-                   <span class="text-emerald-500">🏆</span>
+                   <span class="text-emerald-500">✓ Onaylı</span>
                  {% else %}
-                   <span class="text-amber-500">⌛</span>
+                   <span class="text-amber-500">{{ '⌛ Onay bekleniyor' if user else 'Yok' }}</span>
                  {% endif %}
                </dd>
           </dl>
-
           <div class="my-4 border-t border-slate-200 dark:border-slate-700"></div>
+      {% endif %}
+          {% if referral_verified %}
+          <h3 class="text-sm font-semibold mb-3">📝
+            <a href="#" class="!text-emerald-700 hover:!text-emerald-600 visited:!text-emerald-700
+                        dark:!text-emerald-400 dark:hover:!text-emerald-300 dark:visited:!text-emerald-400
+                        no-underline hover:no-underline underline-offset-4 transition-colors cursor-pointer">
+              Hesap Yönetimi</a></h3>
+          <div class="my-4 border-t border-slate-200 dark:border-slate-700"></div>
+          {% endif %}
 
-          {% if not referral_verified %}
+            {% if not referral_verified %}
             <!-- Güncel Duyuru (yalnızca referansı olmayanlar) -->
             <h4 class="text-sm font-semibold mb-2">Güncel Duyuru</h4>
             <p class="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
               Bazı özelliklere erişim referans doğrulaması gerektirir.
-              Şu anda tüm referans kontenjanı doludur.
+              {{ 'Eğer bir referans kodunuz varsa aşağıya girerek onaylayın.
+              Şu anda tüm referans kontenjanı doludur: İleri bir tarihte yeni bir kontenjan açılabilir.' if user and not referral_verified else
+              'Şu anda tüm referans kontenjanı doludur: İleri bir tarihte yeni bir kontenjan açılabilir.' }}
+
             </p>
+            <p class="text-sm text-slate-600 dark:text-slate-300 leading-relaxed">
+              <a href="#" class="!text-emerald-700 hover:!text-emerald-600 visited:!text-emerald-700
+                        dark:!text-emerald-400 dark:hover:!text-emerald-300 dark:visited:!text-emerald-400
+                        no-underline hover:no-underline underline-offset-4 transition-colors cursor-pointer">
+                {{ '' if user else '' }}</a><!-- Referansınız yoksa ön kayıt için sıraya girebilirsiniz. -->
+              </p>
+
+          {% if not user %}
             <p id="guest-tip" class="mt-2 text-slate-500 dark:text-slate-300 text-sm">
               <a href="/auth/google/login"
                  class="!text-emerald-700 hover:!text-emerald-600 visited:!text-emerald-700
                         dark:!text-emerald-400 dark:hover:!text-emerald-300 dark:visited:!text-emerald-400
-                        no-underline hover:no-underline
-                        underline-offset-4 transition-colors cursor-pointer">
-                Google hesabınız ile giriş yaparak standart özelliklerden ücretsiz yararlanabilirsiniz.
+                        no-underline hover:no-underline underline-offset-4 transition-colors cursor-pointer">
+                Google hesabınız ile giriş yaparak standart erişim özelliklerinden yararlanabilir, yeni bir kontenjan açıldığında heberdar olabilirsiniz.
               </a>
             </p>
-            {% if user %}
-              <button id="open-referral"
-                      class="mt-4 w-full h-10 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">
-                Referans Kodu Gir
-              </button>
-            {% endif %}
+          {% else %}
+            <button id="open-referral"
+                    class="mt-4 w-full h-10 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">
+              Referans Kodu Gir
+            </button>
+          {% endif %}
           {% else %}
             <!-- Hızlı Bakiye Özeti (Asil Üye) -->
-            <h4 class="text-sm font-semibold mb-2">📝 Hızlı Bakiye Özeti</h4>
+            <h4 class="text-sm font-semibold mb-2">🏛️ Hızlı Bakiye Özeti</h4>
             <ul id="qb-list" class="text-sm grid grid-cols-1 gap-y-1">
               <li class="flex items-center justify-between">
-                <span>Cüzdan Bakiyesi (Kullanılabilir)</span><span id="qb-wallet">—</span>
+                <div class="tooltip"><span>Aktif Bakiye</span>
+                  <span class="tooltiptext">Aktif Bakiye, yeni işlemler için veya açık pozisyanların
+                    finansı için kullanılan dinamik cüzdan bakiyesidir.</span>
+                  <span class="circle-icon">i</span>
+                </div><span id="qb-wallet">—</span>
               </li>
+
               <li class="flex items-center justify-between">
-                <span>Net PnL</span><span id="qb-net">—</span>
+                <div class="tooltip"><span>Net PnL</span>
+                  <span class="tooltiptext">Net PnL, belli bir ticaret döneminde
+                    işlem maliyetleri çıkarıldıktan sonra
+                    kalan nihai kâr veya zarardır.</span>
+                  <span class="circle-icon">i</span>
+                </div><span id="qb-net">—</span>
               </li>
-              <li class="flex items-center justify-between">
-                <span>Gerçekleşmemiş PnL</span><span id="qb-upnl">—</span>
+<!--              <li class="flex items-center justify-between">-->
+<!--                <div class="tooltip"><span>Gerçekleşmemiş PnL</span>-->
+<!--                  <span class="tooltiptext">Gerçeklememiş PnL, aktif işlem çifti için açık olan işlemlere göre-->
+<!--                    hesaplanır. Eğer aktif pozisyon yoksa geçekleşmemiş PnL hesaplanmaz.</span>-->
+<!--                  <span class="circle-icon">i</span>-->
+<!--                  </div><span id="qb-upnl">—</span>-->
+<!--              </li>-->
+
+              <li id="qb-upnl-long-row" class="hidden flex flex items-center justify-between">
+                <div class="tooltip">
+                  <span>Gerçekleşmemiş PnL (L)</span>
+                  <span class="tooltiptext">Aktif sembolde long bacağın gerçekleşmemiş PnL değeri.</span>
+                  <span class="circle-icon">i</span>
+                </div>
+                <span id="qb-upnl-long" class="text-sm">—</span>
               </li>
+              <li id="qb-upnl-short-row" class="hidden flex flex items-center justify-between">
+                <div class="tooltip">
+                  <span>Gerçekleşmemiş PnL (S)</span>
+                  <span class="tooltiptext">Aktif sembolde short bacağın gerçekleşmemiş PnL değeri.</span>
+                  <span class="circle-icon">i</span>
+                </div>
+                <span id="qb-upnl-short" class="text-sm">—</span>
+              </li>
+
               <li class="flex items-center justify-between">
-                <span>Açık Pozisyon</span><span id="qb-open">—</span>
+                <span>Pozisyonlar</span><span id="qb-open">—</span>
               </li>
               <li class="flex items-center justify-between">
                 <span>Son Kapanan</span>
@@ -145,45 +222,56 @@
               </li>
             </ul>
             <!-- a11y: quick-balance güncellemesi için live region -->
-            <div id="qb-a11y" class="sr-only" aria-live="polite"></div>
-            <div class="mt-2 flex items-center justify-end gap-2">
-              <!-- Durum etiketi: sabit alan (w-20) + opacity ile görünür/gizli -->
-              <span id="qb-status"
-                    class="text-xs select-none w-20 text-right whitespace-nowrap
-                           opacity-0 transition-opacity duration-150">Yenilendi</span>
-              <button id="qb-refresh" type="button"
-                      aria-label="Hızlı bakiye özetini yenile" title="Hızlı bakiye özetini yenile"
-                      class="h-8 px-3 rounded-lg border border-slate-300 text-slate-700
-                             hover:bg-slate-200 focus-visible:ring-2 focus-visible:ring-slate-300
-                             transition dark:border-slate-600 dark:text-slate-100
-                             dark:hover:bg-slate-700 dark:focus-visible:ring-slate-500 text-sm">
-                Yenile
-              </button>
-            </div>
+<!--            <div id="qb-a11y" class="sr-only" aria-live="polite"></div>-->
+<!--            <div class="mt-2 flex items-center justify-end gap-2">-->
+<!--              &lt;!&ndash; Durum etiketi: sabit alan (w-20) + opacity ile görünür/gizli &ndash;&gt;-->
+<!--              <span id="qb-status"-->
+<!--                    class="text-xs select-none w-20 text-right whitespace-nowrap-->
+<!--                           opacity-0 transition-opacity duration-150">Yenilendi</span>-->
+<!--              <button id="qb-refresh" type="button"-->
+<!--                      aria-label="Hızlı bakiye özetini yenile" title="Hızlı bakiye özetini yenile"-->
+<!--                      class="h-8 px-3 rounded-lg border border-slate-300 text-slate-700-->
+<!--                             hover:bg-slate-200 focus-visible:ring-2 focus-visible:ring-slate-300-->
+<!--                             transition dark:border-slate-600 dark:text-slate-100-->
+<!--                             dark:hover:bg-slate-700 dark:focus-visible:ring-slate-500 text-sm">-->
+<!--                Yenile-->
+<!--              </button>-->
+<!--            </div>-->
           {% endif %}
         </div>
-      </aside>
-    </section>
 
-    <!-- user.referral_verified için kesin hüküm -->
-    <script>
-      window.TRADES_ALLOWED = {{ (user is not none) | tojson }};
-      window.EQUITY_ALLOWED = {{ (referral_verified | default(false)) | tojson }};
-      window.KPI_ALLOWED = window.EQUITY_ALLOWED;
-    </script>
+        {% if referral_verified %}
+        <!-- MA Konfluensi (küçük kart) -->
+        <div class="card shadow-sm p-4 mt-4">
+          <h3 class="text-sm font-semibold mb-2">📊 MA Konfluensi</h3>
+          <!-- Chart.js responsive iken yüksekliği CSS ile sabitle -->
+          <div class="ma-conf-wrap" style="height:183px">
+            <canvas id="maConfluence"></canvas>
+          </div>
+          <div id="maConfluenceLbl"
+               class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+            7↔25, 25↔99, 7↔99 yakınlık (%)
+          </div>
+        </div>
+        {% endif %}
+      </aside>
+     </section>
+
+    <!-- Inline kaldırıldı: flag’leri panel_boot.js HTML data-* üzerinden okuyacak -->
 
     <!-- Tablolar yer tutucu -->
     <section id="sec-trades"
            class="grid grid-cols-1 lg:grid-cols-2 gap-6 {% if not user %}hidden{% endif %}">
 
-      <div class="card shadow-sm p-4"><h2 class="text-sm font-semibold mb-3">Açılan Emirler (Borsa tarafı)</h2>
+      <div class="card shadow-sm p-4"><h2 class="text-sm font-semibold mb-3">Açık Pozisyonlar
+        <span class="text-xs text-slate-400 dark:text-slate-400 leading-relaxed mt-3">(UTC)</span></h2>
         <div id="open-positions"
-             class="text-sm text-slate-500 h-14 overflow-auto overscroll-contain pr-1">—</div></div>
+             class="text-sm text-slate-500 h-30 overflow-auto overscroll-contain pr-1">—</div></div>
 
-      <div class="card shadow-sm p-4"><h2 class="text-sm font-semibold mb-3">Kapanan Emirler. (Borsa tarafı)</h2>
+      <div class="card shadow-sm p-4"><h2 class="text-sm font-semibold mb-3">Kapanmış Pozisyonlar
+        <span class="text-xs text-slate-400 dark:text-slate-400 leading-relaxed mt-3">(UTC)</span></h2>
         <div id="recent-trades"
-             class="text-sm text-slate-500 h-14 overflow-auto overscroll-contain pr-1">—</div></div>
-
+             class="text-sm text-slate-500 h-30 overflow-auto overscroll-contain pr-1">—</div></div>
     </section>
 
     <!-- 30G KPI -->
@@ -197,6 +285,20 @@
       <div class="kpi"><h6>SON İŞLEM</h6><div id="kpi-last" class="text-xs">—</div></div>
     </section>
 
+    <!-- ===== EQUITY (Balance) Grafiği ===== -->
+    <section class="mt-6 {% if not referral_verified %}hidden{% endif %}">
+      <div class="card shadow-sm">
+        <div class="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700">
+          <h3 class="text-sm font-semibold">Bakiye</h3>
+        </div>
+          <div class="w-full h-80 equity-wrap">
+            <canvas id="equityChart"></canvas>
+            <!-- external tooltip hedefi -->
+            <div id="equity-tip"></div>
+          </div>
+      </div>
+    </section>
+
     <!-- ===== EQUITY (Balance) KPI'ları ===== -->
     <section id="equity-kpi"
      class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 {% if not referral_verified %}hidden{% endif %}">
@@ -208,34 +310,22 @@
       <div class="kpi"><h6>YILLIK GETİRİ</h6><div id="stat-cagr">—</div></div>
     </section>
 
-    <!-- ===== EQUITY (Balance) Grafiği + CAP ===== -->
-    <section class="mt-6 {% if not referral_verified %}hidden{% endif %}">
-      <div class="card shadow-sm">
-        <div class="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700">
-          <h3 class="text-sm font-semibold">Bakiye</h3>
-        </div>
-        <div class="p-4">
-          <div class="w-full h-80">
-            <canvas id="equityChart"></canvas>
-          </div>
-        </div>
-      </div>
-    </section>
+  <!-- LightweightCharts (yerel) -->
+  <script src="{{ url_for('static', path='js/vendor/lightweight-charts/4.2.0/lightweight-charts.standalone.production.js') }}" defer></script>
 
-  <!-- Lightweight Charts -->
-  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js" defer></script>
-
+  <!-- Chart.js & moment (yerel) -->
   {% if referral_verified %}
-  <!-- Chart.js (yalnız referansı doğrulanmış kullanıcılar için) -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/moment"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-moment"></script>
+  <script src="{{ url_for('static', path='js/vendor/chart.js/4.5.0/chart.umd.min.js') }}" defer></script>
+  <script src="{{ url_for('static', path='js/vendor/moment/2.30.1/moment.js') }}" defer></script>
+  <script src="{{ url_for('static', path='js/vendor/chartjs-adapter-moment/1.0.1/chartjs-adapter-moment.js') }}" defer></script>
   {% endif %}
 
+  <!-- flags -->
+  <script src="{{ url_for('static', path='js/panel_boot.js') }}?v=1" defer></script>
   <!-- Panel / Panel JS -->
-  <script src="{{ url_for('static', path='js/panel.js') }}?v=20250822fa" defer></script>
+  <script src="{{ url_for('static', path='js/panel_main.js') }}?v=20250908a" defer></script>
   {% if referral_verified %}
-  <script src="{{ url_for('static', path='js/panel_equity.js') }}?v=20250822ea" defer></script>
+  <script src="{{ url_for('static', path='js/panel_equity.js') }}?v=20250822eb" defer></script>
   {% endif %}
 
   <!-- Referans modal -->
@@ -243,7 +333,7 @@
     <form id="ref-form" method="dialog" class="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-xl overflow-hidden">
       <div class="p-4 border-b border-slate-200 dark:border-slate-700 text-sm font-semibold">Referans Kodu Doğrula</div>
       <div class="p-4 space-y-3">
-        <input id="ref-code" type="text" placeholder="AAAA-BBBB-CCCC"
+        <input id="ref-code" type="text" name="code" placeholder="AAAA-BBBB-CCCC"
                class="w-full h-10 px-3 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700 uppercase tracking-wider" autocomplete="one-time-code" />
         <div id="ref-msg" class="text-sm"></div>
       </div>
@@ -253,6 +343,7 @@
       </div>
     </form>
   </dialog>
+
   <!-- Safelist for runtime-added classes (light/dark tones from panel.js) -->
   <div class="hidden">
     <span class="text-sky-700 bg-sky-50 border-sky-200 dark:text-sky-200 dark:bg-sky-500/15 dark:border-sky-300/40"></span>
@@ -264,32 +355,32 @@
   <div class="max-w-7xl mx-auto px-4 lg:px-6">
     <div class="text-center space-y-3">
       <div class="text-sm text-slate-600 dark:text-slate-400">
-        © <span id="ft-year-b"></span> Sigmom SAI —
-        <a href="/legal/terms" class="text-slate-700 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white underline underline-offset-2 transition-colors">
-          Kullanım Şartları
-        </a>
+        Copyright © <span id="ft-year-b"></span> Sigmom, <a href="https://github.com/lazerciler/sigmom" target="_blank">Project SAI GitHub.</a>&nbsp;
+        <a href="/legal/terms" class="text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white underline underline-offset-2 transition-colors">
+          Şartlar</a>
         <span class="mx-1.5 text-slate-400">·</span>
-        <a href="/legal/privacy" class="text-slate-700 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white underline underline-offset-2 transition-colors">
-          Gizlilik
-        </a>
+        <a href="/legal/privacy" class="text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white underline underline-offset-2 transition-colors">
+          Gizlilik</a>
       </div>
       <p class="text-xs text-slate-500 dark:text-slate-500 leading-relaxed">
-        Google ile Giriş, Google LLC tarafından sağlanır.
+        Google ile Giriş, Google LLC tarafından sağlanır. &nbsp;
         <a target="_blank" rel="noopener" href="https://policies.google.com/terms"
-           class="text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-300 underline underline-offset-2 transition-colors">
+           class="text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-300 underline underline-offset-2 transition-colors">
           Şartlar
         </a>
         <span class="mx-1 text-slate-400">·</span>
         <a target="_blank" rel="noopener" href="https://policies.google.com/privacy"
-           class="text-slate-600 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-300 underline underline-offset-2 transition-colors">
+           class="text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-300 underline underline-offset-2 transition-colors">
           Gizlilik
         </a>
       </p>
     </div>
   </div>
 </footer>
-
-
-  </main>
+</main>
+<!-- Theme Toggle  -->
+<script src="{{ url_for('static', path='js/theme_toggle.js') }}?v=1c"></script>
+<!-- Theme Footer  -->
+<script src="{{ url_for('static', path='js/theme_footer.js') }}?v=1a"></script>
 </body>
 </html>

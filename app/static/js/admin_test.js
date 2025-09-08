@@ -4,24 +4,44 @@ const WEBHOOK_URL = '/webhook';
 const el = id => document.getElementById(id);
 const qs = sel => document.querySelector(sel);
 
-/** Status badge */
+/** Status */
 async function refreshStatus(){
   try{
     const r = await fetch('/admin/test/status');
     const j = await r.json();
     const b = el('modeBadge');
+
     if(j.success){
       const ok = j.config_mode === j.exchange_mode;
-      b.textContent = `mode: ${j.exchange_mode} (cfg: ${j.config_mode})`;
+      b.textContent = `Exchange Mode: ${j.exchange_mode} (cfg: ${j.config_mode})`;
       b.className = 'pill ' + (ok ? 'ok' : 'warn');
     }else{
       b.textContent = 'mode: unknown';
       b.className = 'pill err';
     }
+
+    // Exchange bilgisini otomatik olarak set et (daha temiz versiyon)
+    if (j.exchange) {
+      el('exchangeDisplay').textContent = j.exchange;
+      el('exchange').value = j.exchange;
+
+      if (j.success) {
+        el('exchangeStatus').textContent = '✓';
+        el('exchangeStatus').className = 'pill ok';
+      } else {
+        el('exchangeStatus').textContent = '✗';
+        el('exchangeStatus').className = 'pill err';
+      }
+      el('exchangeStatus').style.display = 'inline-block';
+    } else {
+      el('exchangeStatus').style.display = 'none';
+    }
+
   }catch(_){
     const b = el('modeBadge');
     b.textContent = 'mode: error';
     b.className = 'pill err';
+    el('exchangeStatus').style.display = 'none'; // Hata durumunda da tik'i gizle
   }
 }
 refreshStatus();
@@ -73,7 +93,7 @@ function buildPayload() {
   const position_size = parseFloat(el('position_size').value);
   const order_type = el('order_type').value.trim();
   const exchange = el('exchange').value;
-  const timestamp = el('timestamp').value.trim() || nowIsoByMode();
+  const timestamp = el('timestamp').value.trim();
   const fund_manager_id = el('fund_manager_id').value.trim();
 
   const leverage = clampLev(el('leverage').value);
@@ -88,11 +108,31 @@ function buildPayload() {
     timestamp,
     fund_manager_id
   };
-  if (leverage !== null) payload.leverage = leverage;
+
+  const posModeEl = document.getElementById('position_mode');
+  if (posModeEl) {
+    const val = posModeEl.value?.trim().toLowerCase();
+    if (val === 'hedge' || val === 'one_way') {
+      payload.position_mode = val;
+    }
+  }
+
+  // timestamp varsa ekle (kullanıcı seçimi)
+  if (timestamp) payload.timestamp = timestamp;
+
+  // leverage sadece mode=open iken gönder
+  if (mode === 'open' && leverage !== null) payload.leverage = leverage;
   if (entry_price !== null) payload.entry_price = entry_price;
   if (exit_price  !== null) payload.exit_price  = exit_price;
 
   return payload;
+}
+
+// mode değişince leverage alanını yönet (close => disable & temizle)
+function syncLeverageState() {
+  const isOpen = qs('input[name="mode"]:checked').value === 'open';
+  const lev = el('leverage');
+  lev.disabled = !isOpen;
 }
 
 /** Raw edit support */
@@ -126,10 +166,17 @@ function setStatus(text, cls='') {
   s.textContent = text;
   s.className = 'pill ' + cls;
 }
+
 function setRespBadge(ok) {
   const b = el('respBadge');
   b.textContent = ok ? 'success' : 'error';
   b.className = 'pill ' + (ok ? 'ok' : 'err');
+
+  // 5 saniye sonra otomatik reset
+  setTimeout(() => {
+    b.textContent = '–';
+    b.className = 'pill';
+  }, 2000);
 }
 
 /** Send */
@@ -142,7 +189,6 @@ async function sendSignal() {
     return;
   }
 
-  // Optional: normalize timestamp to UTC for sending (new exchanges safe default)
   if (el('sendUtc')?.checked && payload.timestamp) {
     const d = new Date(payload.timestamp);
     if (!isNaN(d)) {
@@ -173,7 +219,6 @@ async function sendSignal() {
   }
 }
 
-/** TZ mode switch converts existing value */
 function applyTzModeToCurrentValue() {
   const ts = el('timestamp');
   const raw = ts.value.trim();
@@ -184,10 +229,32 @@ function applyTzModeToCurrentValue() {
   refreshPreview();
 }
 
-/** Hooks */
 document.querySelectorAll('input[name="tzmode"]').forEach(r => {
   r.addEventListener('change', applyTzModeToCurrentValue);
 });
+
+document.querySelectorAll('input[name="mode"]').forEach(r => {
+  r.addEventListener('change', () => {
+    syncLeverageState();
+    refreshPreview();
+  });
+});
+
+document.querySelectorAll('input[name="side"]').forEach(r => {
+  r.addEventListener('change', () => {
+    refreshPreview();
+  });
+});
+
+el('leverage').addEventListener('input', refreshPreview);
+el('position_size').addEventListener('input', refreshPreview);
+el('symbol').addEventListener('input', refreshPreview);
+// timestamp canlı dinlensin → yazdıkça önizleme güncellensin
+el('timestamp').addEventListener('input', refreshPreview);
+el('entry_price').addEventListener('input', refreshPreview);
+el('exit_price').addEventListener('input', refreshPreview);
+el('order_type').addEventListener('change', refreshPreview);
+el('position_mode').addEventListener('change', refreshPreview);
 
 el('btnNow').addEventListener('click', (e) => {
   e.preventDefault();
@@ -261,6 +328,32 @@ el('btnFormat').addEventListener('click', () => {
   }
 });
 
-/** Init */
-el('timestamp').value = nowIsoByMode();
+syncLeverageState(); // ilk yüklemede doğru duruma getir
 refreshPreview();
+
+let statusInterval;
+
+function startStatusPolling() {
+  refreshStatus();
+  statusInterval = setInterval(refreshStatus, 2000);
+}
+
+function stopStatusPolling() {
+  if (statusInterval) {
+    clearInterval(statusInterval);
+  }
+}
+
+// Sayfa yüklendiğinde direkt başlat
+document.addEventListener('DOMContentLoaded', function() {
+  startStatusPolling();
+});
+
+// Visibility change için dinleyici
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState === 'visible') {
+    startStatusPolling();
+  } else {
+    stopStatusPolling();
+  }
+});

@@ -19,9 +19,6 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 from app.database import Base
 
-# from sqlalchemy.orm import declarative_base, relationship
-# Base = declarative_base()
-
 
 class RawSignal(Base):
     __tablename__ = "raw_signals"
@@ -123,3 +120,19 @@ class StrategyTrade(Base):
 
     raw_signal = relationship("RawSignal", back_populates="close_trades")
     open_trade = relationship("StrategyOpenTrade", back_populates="trades")
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    email = Column(String(255), unique=True, index=True, nullable=False)
+    google_sub = Column(String(64), unique=True, index=True)
+    name = Column(String(255))
+    avatar_url = Column(String(512))
+    role = Column(String(32), nullable=False, server_default=text("'user'"))
+    referral_verified_at = Column(DateTime(timezone=True))
+    created_at = Column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())

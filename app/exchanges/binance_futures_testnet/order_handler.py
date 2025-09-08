@@ -100,10 +100,11 @@ async def place_order(
 
     mode = (signal_data.mode or "").lower()
     side_in = (signal_data.side or "").lower()
-    # OPEN → aynı yön, CLOSE → ters yön + reduceOnly
+    # One-Way:  CLOSE ⇒ ters yön + reduceOnly
+    # Hedge:    CLOSE ⇒ ters yön (reduceOnly YOK; Binance reddeder)
     if mode == "close":
         api_side = "SELL" if side_in == "long" else "BUY"
-        reduce_only = True
+        reduce_only = POSITION_MODE != "hedge"
     else:
         api_side = "BUY" if side_in == "long" else "SELL"
         reduce_only = False
@@ -117,10 +118,13 @@ async def place_order(
         "timestamp": server_time,
         "recvWindow": 5000,
     }
-    if reduce_only:
+    if reduce_only and POSITION_MODE != "hedge":
         params["reduceOnly"] = "true"
     if POSITION_MODE == "hedge":
         params["positionSide"] = "LONG" if side_in == "long" else "SHORT"
+        # Emniyet: Hedge modda reduceOnly asla gönderilmemeli
+        params.pop("reduceOnly", None)
+
     if client_order_id:
         params["newClientOrderId"] = client_order_id
 
@@ -144,7 +148,7 @@ async def place_order(
         return {"success": False, "message": str(e), "data": {}}
 
 
-async def get_position(symbol: str) -> dict:
+async def get_position(symbol: str, side: Optional[str] = None) -> dict:
     """Binance Futures pozisyon bilgilerini alır."""
     logger.debug("📡 get_position() → %s", symbol)
     endpoint = ENDPOINTS["POSITION_RISK"]
@@ -168,10 +172,27 @@ async def get_position(symbol: str) -> dict:
         return {}
 
     if isinstance(data, list):
-        for p in data:
-            if p.get("symbol") == sym:
-                return p
-    logger.error("Position for %s not found: %s", sym, data)
+        # Sembol filtrele
+        cands = [p for p in data if p.get("symbol") == sym]
+        if not cands:
+            logger.error("Position for %s not found: %s", sym, data)
+            return {}
+        # Hedge: doğru bacağı seç
+        side_norm = (side or "").strip().lower()
+        if POSITION_MODE == "hedge" and side_norm in ("long", "short"):
+            target = "LONG" if side_norm == "long" else "SHORT"
+            for p in cands:
+                if p.get("positionSide") == target:
+                    return p
+        # Fallback: non-zero miktarlı ilk kayıt ya da ilk aday
+        for p in cands:
+            try:
+                if float(p.get("positionAmt", "0")) != 0.0:
+                    return p
+            except Exception:
+                pass
+        return cands[0]
+    logger.error("Position for %s not found (non-list): %s", sym, data)
     return {}
 
 
@@ -206,3 +227,66 @@ async def query_order_status(symbol: str, order_id: str) -> dict:
     except Exception as e:
         logger.exception("An error occurred during the Binance order status query.")
         return {"success": False, "message": str(e)}
+
+
+# ---------------------- Borsa-onaylı Net PnL (income) ------------------------
+async def income_summary(
+    start_ms: int,
+    end_ms: int,
+    symbol: Optional[str] = None,
+    limit: int = 1000,
+) -> dict:
+    """
+    Binance Futures /fapi/v1/income akışını okuyup tip bazında toplar.
+    Dönen 'net', borsanın verdiği tüm gelir/masraf kalemlerinin toplamıdır:
+      Net = Σ(REALIZED_PNL, COMMISSION, FUNDING_FEE, …)
+    (COMMISSION genelde negatif, FUNDING_FEE pozitif/negatif olabilir.)
+    """
+    endpoint = ENDPOINTS.get("INCOME", "/fapi/v1/income")
+    url = BASE_URL + endpoint
+    totals = {}
+    last = int(start_ms)
+    try:
+        async with httpx.AsyncClient(timeout=15) as c:
+            while True:
+                ts = await get_binance_server_time()
+                params = {
+                    "timestamp": ts,
+                    "recvWindow": 5000,
+                    "startTime": last,
+                    "endTime": int(end_ms),
+                    "limit": limit,
+                }
+                if symbol:
+                    params["symbol"] = (symbol or "").upper()
+
+                q = urlencode(sorted(params.items()))
+                sig = sign_payload(params)
+                r = await c.get(
+                    f"{url}?{q}&signature={sig}", headers=get_signed_headers()
+                )
+                r.raise_for_status()
+                rows = r.json() or []
+                if not rows:
+                    break
+
+                for it in rows:
+                    k = str(it.get("incomeType") or "")
+                    v = float(it.get("income") or 0.0)
+                    totals[k] = totals.get(k, 0.0) + v
+                    t = int(it.get("time") or 0)
+                    if t > last:
+                        last = t
+                if len(rows) < limit:
+                    break
+                last += 1  # bir sonraki sayfa
+    except Exception as e:
+        logger.exception("income_summary failed: %s", e)
+        return {"success": False, "net": 0.0, "sum": {}, "message": str(e)}
+
+    net = sum(totals.values())
+    return {
+        "success": True,
+        "net": float(net),
+        "sum": {k: float(v) for k, v in totals.items()},
+    }

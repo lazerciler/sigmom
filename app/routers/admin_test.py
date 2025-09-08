@@ -4,15 +4,23 @@
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from app.dependencies.auth import get_current_user, require_admin
+from app.dependencies.auth import get_current_user, require_admin_db
 from app.exchanges.binance_futures_testnet.settings import (
     POSITION_MODE as CFG_MODE,
     EXCHANGE_NAME,
 )
 from app.exchanges.binance_futures_testnet.utils import get_position_mode
+from pathlib import Path
 
-router = APIRouter(prefix="/admin/test", tags=["admin-test"])
-templates = Jinja2Templates(directory="app/templates")
+router = APIRouter(
+    prefix="/admin/test",
+    tags=["admin-test"],
+    # Tüm endpoint'ler admin korumalı
+    dependencies=[Depends(require_admin_db)],
+)
+
+TEMPLATES_DIR = Path(__file__).resolve().parents[1] / "templates"  # app/templates
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 CSP = (
     "default-src 'self'; "
@@ -28,7 +36,7 @@ CSP = (
 
 @router.get("/status")
 async def admin_test_status(current_user=Depends(get_current_user)):
-    require_admin(current_user)
+    # require_admin_db(current_user)
     ex = EXCHANGE_NAME
     chk = await get_position_mode()
     return {
@@ -43,7 +51,7 @@ async def admin_test_status(current_user=Depends(get_current_user)):
 @router.get("", response_class=HTMLResponse)
 async def admin_test_page(request: Request, current_user=Depends(get_current_user)):
     # Merkezde tanımlı adminlere izin ver (aksi halde 403)
-    require_admin(current_user)  # aynı koruma referral panelinde de var
+    # require_admin_db(current_user)  # aynı koruma referral panelinde de var
     return templates.TemplateResponse(
         "admin_test.html",
         {"request": request, "current_user": current_user},

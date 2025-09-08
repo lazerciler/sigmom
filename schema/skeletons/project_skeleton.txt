@@ -14,10 +14,6 @@
 ├── requirements.txt
 ├── tailwind.config.js
 ├── tailwindcss4.exe
-├── update.diff
-├── update1.diff
-├── update2.diff
-├── update3.diff
 ├── .github/
 │   └── workflows/
 │       └── ci.yml
@@ -25,10 +21,10 @@
 │   ├── __init__.py
 │   ├── config.py
 │   ├── database.py
-│   ├── dependencies.py
 │   ├── main.py
 │   ├── models.py
 │   ├── schemas.py
+│   ├── user.py
 │   ├── dependencies/
 │   │   ├── __init__.py
 │   │   └── auth.py
@@ -48,9 +44,10 @@
 │   ├── routers/
 │   │   ├── __init__.py
 │   │   ├── admin_referrals.py
+│   │   ├── admin_settings.py
 │   │   ├── admin_test.py
-│   │   ├── auth.py
 │   │   ├── auth_google.py
+│   │   ├── auth_logout.py
 │   │   ├── market.py
 │   │   ├── panel.py
 │   │   ├── panel_data.py
@@ -70,14 +67,33 @@
 │   │   │   └── logo.svg
 │   │   └── js/
 │   │       ├── admin_referrals.js
-│   │       ├── admin_referrals_head.js
 │   │       ├── admin_test.js
-│   │       ├── htmx.min.js
-│   │       ├── panel.js
+│   │       ├── panel_boot.js
 │   │       ├── panel_equity.js
-│   │       └── panel_head.js
+│   │       ├── panel_main.js
+│   │       ├── theme_boot.js
+│   │       ├── theme_footer.js
+│   │       ├── theme_toggle.js
+│   │       └── vendor/
+│   │           ├── chart.js/
+│   │           │   └── 4.5.0/
+│   │           │       └── chart.umd.min.js
+│   │           ├── chartjs-adapter-moment/
+│   │           │   └── 1.0.1/
+│   │           │       └── chartjs-adapter-moment.js
+│   │           ├── htmx/
+│   │           │   └── 2.0.6/
+│   │           │       └── htmx.min.js
+│   │           ├── lightweight-charts/
+│   │           │   └── 4.2.0/
+│   │           │       └── lightweight-charts.standalone.production.js
+│   │           └── moment/
+│   │               └── 2.30.1/
+│   │                   ├── moment.js
+│   │                   └── moment.min.js
 │   ├── templates/
 │   │   ├── admin_referrals.html
+│   │   ├── admin_settings.html
 │   │   ├── admin_test.html
 │   │   └── panel.html
 │   └── utils/
@@ -86,6 +102,9 @@
 │       ├── generate_hash.py
 │       ├── position_utils.py
 │       └── signing.py
+├── cert/
+│   ├── cert.pem
+│   └── key.pem
 ├── crud/
 │   ├── __init__.py
 │   ├── raw_signal.py
@@ -126,10 +145,12 @@
 │   └── skeletons/
 │       └── project_skeleton.txt
 ├── scripts/
+│   ├── generate_cert.py
 │   ├── generate_timestamp.py
 │   ├── idtest.py
 │   ├── README.md
 │   ├── seed_demo_users.py
 │   └── zip_logger_backup.py
 └── tests/
+    ├── dev_mock_dependencies.py
     └── test_trade_helpers.py

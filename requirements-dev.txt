@@ -3,3 +3,4 @@
 # pre-commit run -a
 
 pre-commit  # Virtual environment'da çalıştır
+cryptography>=40.0.0 # "Self Signed" sertifika oluşturmak için: python scripts/generate_cert.py

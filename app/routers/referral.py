@@ -1,134 +1,140 @@
 #!/usr/bin/env python3
 # app/routers/referral.py
 # Python 3.9
-import bcrypt
+from __future__ import annotations
 import re
-from pydantic import BaseModel, validator
-from typing import ClassVar, Pattern
-from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Request
+import bcrypt
+from typing import Optional, Dict, Any
+from fastapi import APIRouter, Depends, HTTPException, Request, Body, Form
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
-from app.database import async_session
-from app.dependencies.auth import get_current_user_opt
+from app.database import get_db
+from app.dependencies.auth import get_current_user
 
-router = APIRouter()
-
-
-class VerifyIn(BaseModel):
-    code: str
-
-    # Field değil, sınıf sabiti:
-    code_re: ClassVar[Pattern[str]] = re.compile(
-        r"^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$"
-    )
-
-    @validator("code", pre=True)
-    def normalize_and_validate(cls, v: str) -> str:
-        v = (v or "").strip().upper()
-        if not cls.code_re.fullmatch(v):
-            raise ValueError("Kod formatı geçersiz. Örn: AB12-CDEF-3456")
-        return v
+router = APIRouter(prefix="/referral", tags=["referral"])
+CODE_RE = re.compile(r"^[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$")
 
 
 @router.post("/verify")
 async def verify_referral(
-    body: VerifyIn,
-    _request: Request,
-    user=Depends(get_current_user_opt),
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    user: Optional[Dict[str, Any]] = Depends(get_current_user),
+    code_form: Optional[str] = Form(None),
+    payload: Optional[Dict[str, Any]] = Body(None),
 ):
     if not user:
-        raise HTTPException(401, "Giriş gerekli.")
+        raise HTTPException(status_code=401, detail="Giriş gerekli")
 
-    # Pydantic validator normalize etti (UPPER + 4-4-4 kontrolü)
-    code = body.code
-    email_norm = (user["email"] or "").strip().lower()
-    now = datetime.utcnow()
+    # 1) Kodu mümkün olan her kaynaktan oku (JSON → Form → raw json → raw form)
+    code = (code_form or "").strip()
+    if not code and payload and "code" in payload:
+        v = payload.get("code")
+        code = (v if v is not None else "").strip()
+    if not code:
+        # Fallback: bazı ortamlarda Body/Form çözümlemesi başarısız olabiliyor
+        try:
+            j = await request.json()
+            v = j.get("code") if isinstance(j, dict) else None
+            code = (v or "").strip()
+        except Exception:
+            pass
+    if not code:
+        try:
+            frm = await request.form()
+            code = (frm.get("code") or "").strip()
+        except Exception:
+            pass
 
-    async with async_session() as db:
-        async with db.begin():
-            # 0) idempotent
-            already = await db.execute(
-                text(
-                    """
-                SELECT 1
-                FROM referral_codes
-                WHERE used_by_user_id = :uid AND status = 'CLAIMED'
-                LIMIT 1
+    code = code.upper()
+    if not code:
+        raise HTTPException(status_code=400, detail="Code required")
+    if not CODE_RE.fullmatch(code):
+        raise HTTPException(
+            status_code=400, detail="Kod formatı geçersiz. Örn: AB12-CDEF-3456"
+        )
+
+    # 2) İdempotent: zaten doğrulanmışsa OK
+    already = (
+        await db.execute(
+            text(
+                """
+        SELECT 1 FROM referral_codes
+         WHERE used_by_user_id=:uid AND status='CLAIMED' LIMIT 1
+    """
+            ),
+            {"uid": user["id"]},
+        )
+    ).first()
+    if already:
+        return {"ok": True, "status": "CLAIMED", "already": True}
+
+    email = (user.get("email") or "").strip().lower()
+    raw = code.encode("utf-8")
+
+    # 3) SADECE bu kullanıcıya RESERVED edilmiş ve aktif olan kodlar
+    rows = (
+        await db.execute(
+            text(
+                """
+        SELECT id, code_hash
+          FROM referral_codes
+         WHERE status='RESERVED'
+           AND LOWER(TRIM(email_reserved))=:email
+           AND (expires_at IS NULL OR expires_at > NOW())
+    """
+            ),
+            {"email": email},
+        )
+    ).all()
+
+    match_id = None
+    for rid, chash in rows:
+        try:
+            if isinstance(chash, str) and bcrypt.checkpw(raw, chash.encode("utf-8")):
+                match_id = rid
+                break
+        except Exception:
+            pass
+
+    if match_id is None:
+        # Kural gereği AVAILABLE’dan claim YOK
+        raise HTTPException(
+            status_code=400, detail="Kod size tahsisli değil veya süresi dolmuş"
+        )
+
+    # 4) Atomik claim
+    upd = await db.execute(
+        text(
             """
-                ),
-                {"uid": user["id"]},
-            )
-            if already.first():
-                return {"ok": True}
+        UPDATE referral_codes
+           SET used_by_user_id=:uid,
+               status='CLAIMED',
+               used_at=NOW(),
+               email_reserved=NULL,
+               expires_at=NULL
+         WHERE id=:rid
+           AND status='RESERVED'
+           AND LOWER(TRIM(email_reserved))=:email
+           AND (expires_at IS NULL OR expires_at > NOW())
+    """
+        ),
+        {"uid": user["id"], "rid": match_id, "email": email},
+    )
+    if upd.rowcount != 1:
+        raise HTTPException(status_code=409, detail="Kod artık uygun değil")
 
-            # 1) Adaylar: SADECE bu e-postaya tahsisli + süresi geçmemiş
-            res = await db.execute(
-                text(
-                    """
-                SELECT id, code_hash
-                FROM referral_codes
-                WHERE status = 'RESERVED'
-                  AND LOWER(TRIM(email_reserved)) = :email
-                  AND (expires_at IS NULL OR expires_at > :now)
+    await db.execute(
+        text(
             """
-                ),
-                {"email": email_norm, "now": now},
-            )
-            rows = res.all()
-
-            # # --- GEÇİCİ TEŞHİS ---
-            # print("verify email_norm:", email_norm)
-            # print("verify candidates:", [r[0] for r in rows])
-
-            # 2) Bcrypt ile plaintext eşleşmesi
-            bcrypt_re = re.compile(r"^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$")
-            match_id = None
-            raw = code.encode("utf-8")
-            for rid, chash in rows:
-                if not isinstance(chash, str) or not bcrypt_re.match(chash):
-                    continue
-                if bcrypt.checkpw(raw, chash.encode("utf-8")):
-                    match_id = rid
-                    # print("verify matched id:", match_id)  # --- GEÇİCİ TEŞHİS ---
-                    break
-
-            if not match_id:
-                raise HTTPException(
-                    400, "Kod bulunamadı veya size tahsisli/aktif değil."
-                )
-
-            # 3) Koşullu CLAIM (Unlimited: expires_at=NULL)
-            result = await db.execute(
-                text(
-                    """
-                UPDATE referral_codes
-                SET status='CLAIMED',
-                    used_by_user_id=:uid,
-                    used_at=:now,
-                    expires_at=NULL
-                WHERE id=:rid
-                  AND status='RESERVED'
-                  AND LOWER(TRIM(email_reserved)) = :email
-                  AND (expires_at IS NULL OR expires_at > :now)
-            """
-                ),
-                {"uid": user["id"], "email": email_norm, "now": now, "rid": match_id},
-            )
-
-            print("verify update rowcount:", result.rowcount)  # --- GEÇİCİ TEŞHİS ---
-
-            if result.rowcount == 0:
-                raise HTTPException(
-                    409, "Kod artık uygun değil. Lütfen tekrar deneyin."
-                )
-
-            # 4) Kullanıcıyı işaretle
-            await db.execute(
-                text(
-                    "UPDATE users SET referral_verified_at=:now, updated_at=:now WHERE id=:uid"
-                ),
-                {"now": now, "uid": user["id"]},
-            )
-
-    return {"ok": True}
+        UPDATE users
+           SET referral_verified_at = COALESCE(referral_verified_at, NOW()),
+               updated_at = NOW()
+         WHERE id=:uid
+    """
+        ),
+        {"uid": user["id"]},
+    )
+    await db.commit()
+    return {"ok": True, "status": "CLAIMED"}

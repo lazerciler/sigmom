@@ -35,5 +35,6 @@ async def verify_closed_trades_for_execution(db: AsyncSession, execution):
                 f"[closed-verify] {trade.symbol} → borsada pozisyon yok; kapanış kaydı yapılıyor."
             )
             await close_open_trade_and_record(db, trade, pos)
+            # await db.commit()
         else:
             logger.debug(f"[closed-verify] {trade.symbol} → hâlâ açık (amt={amt}).")

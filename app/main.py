@@ -23,22 +23,14 @@ from app.routers import panel
 from app.routers import panel_data
 from app.routers import referral
 from app.routers import auth_google
+from app.routers import admin_settings
 from app.routers import admin_referrals
 from app.routers import admin_test
-from app.routers import auth
+from app.routers import auth_logout
 from app.routers import market
 from app.services.referral_maintenance import cleanup_expired_reserved
 
 
-# REQUIRED_PYTHON = (3, 9)
-# if (
-#     sys.version_info[:2] != REQUIRED_PYTHON
-# ):  # Sadece major.minor versiyonunu kontrol eder (3.9.x)
-#     sys.exit(
-#         f"Bu uygulama sadece Python {REQUIRED_PYTHON[0]}.{REQUIRED_PYTHON[1]} ile çalışır.\n"
-#         f"Kullandığınız versiyon: {sys.version.split()[0]}\n"
-#         f"Lütfen Python 3.9 kurunuz."
-#     )
 if sys.version_info < (3, 9):
     sys.exit(f"Bu uygulama Python 3.9+ gerektirir. Bulundu: {sys.version.split()[0]}")
 
@@ -59,11 +51,12 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 app.include_router(webhook_router.router)
 app.include_router(panel.router)
 app.include_router(panel_data.router)
-app.include_router(auth_google.router, prefix="/auth/google", tags=["auth"])
-app.include_router(referral.router, prefix="/referral", tags=["referral"])
+app.include_router(auth_google.router)
+app.include_router(referral.router)
+app.include_router(admin_settings.router)
 app.include_router(admin_referrals.router)
 app.include_router(admin_test.router)
-app.include_router(auth.router)
+app.include_router(auth_logout.router)
 app.include_router(market.router)
 
 
@@ -98,8 +91,8 @@ setup_logging()
 
 
 # Health check
-@app.get("/", tags=["Health"])
-async def root():
+@app.get("/api/health", tags=["Health"])
+async def health():
     return {"status": "alive", "version": "1.0.0"}
 
 
@@ -121,7 +114,7 @@ async def verifier_iteration(db, exchange_name: str) -> None:
 
 async def verifier_loop(poll_interval: int = 5, cleanup_interval_sec: int = 10 * 60):
     await asyncio.sleep(3)
-    verifier_logger.info("Verifier loop startup’ta başlatıldı.")
+    verifier_logger.info("Verifier loop was launched at the startup.")
 
     last_cleanup_ts = 0.0
 
@@ -159,6 +152,7 @@ async def startup_event():
 if __name__ == "__main__":
     import uvicorn
 
-    https_only = True
-
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+
+# https
+# uvicorn app.main:app --host 0.0.0.0 --port 8000 --ssl-keyfile cert/key.pem --ssl-certfile cert/cert.pem --reload

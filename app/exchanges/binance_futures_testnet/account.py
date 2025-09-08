@@ -4,8 +4,10 @@
 import httpx
 import re
 import time
+from datetime import datetime
 from typing import Optional, Any, Iterable, Dict, Tuple
 from urllib.parse import urlencode
+
 
 from .settings import BASE_URL, ENDPOINTS
 from .utils import sign_payload, get_binance_server_time, get_signed_headers
@@ -105,17 +107,23 @@ async def get_unrealized(symbol: Optional[str] = None, return_all: bool = False)
     open_pos = [p for p in rows if abs(fnum(p.get("positionAmt"))) > 0]
     if symbol:
         s = _normalize_symbol(symbol)
-        one = next((p for p in open_pos if str(p.get("symbol", "")).upper() == s), None)
-        upnl = fnum(one.get("unRealizedProfit")) if one else 0.0
-        return {
-            "symbol": s,
-            "unrealized": upnl,
-            "entry_price": fnum(one.get("entryPrice")) if one else 0.0,
-            "position_amt": fnum(one.get("positionAmt")) if one else 0.0,
-            "leverage": fnum(one.get("leverage")) if one else 0.0,
-            "mark_price": fnum(one.get("markPrice")) if one else 0.0,
-            "liquidation_price": fnum(one.get("liquidationPrice")) if one else 0.0,
-        }
+        legs = [
+            {
+                "symbol": str(p.get("symbol", "")).upper(),
+                "positionSide": str(p.get("positionSide") or "").upper(),
+                "unRealizedProfit": fnum(p.get("unRealizedProfit")),
+                "positionAmt": fnum(p.get("positionAmt")),
+                "entryPrice": fnum(p.get("entryPrice")),
+                "leverage": fnum(p.get("leverage")),
+                "markPrice": fnum(p.get("markPrice")),
+                "liquidationPrice": fnum(p.get("liquidationPrice")),
+            }
+            for p in open_pos
+            if str(p.get("symbol", "")).upper() == s
+        ]
+        if return_all:
+            return legs
+        return legs
     # tüm semboller
     details = [
         {
@@ -133,6 +141,86 @@ async def get_unrealized(symbol: Optional[str] = None, return_all: bool = False)
     if return_all:
         return {"total": total, "positions": details}
     return {"unrealized": total}
+
+
+# --------------------------- Net PnL (income summary) ---------------------------
+async def income_summary(
+    symbol: Optional[str] = None,
+    since: Optional[datetime] = None,
+    until: Optional[datetime] = None,
+) -> float:
+    """
+    Binance USDⓈ-M Futures gelir dökümünden (REALIZED_PNL) net toplamı döndürür.
+    - symbol: 'BTCUSDT' gibi (opsiyonel)
+    - since/until: datetime(UTC); sayfalama ile /fapi/v1/income taranır.
+    Not: Testnet'te de bu uç desteklenir; limit=1000 sayfalanır.
+    """
+    ep = ENDPOINTS.get("INCOME", "/fapi/v1/income")
+    url = BASE_URL + ep
+
+    # Zaman damgaları (ms)
+    start_ms = int((since or datetime.utcfromtimestamp(0)).timestamp() * 1000)
+    end_ms: Optional[int] = int(until.timestamp() * 1000) if until else None
+
+    # Ortak başlıklar / imza
+    try:
+        ts = await get_binance_server_time()
+    except Exception:
+        ts = int(time.time() * 1000)
+    headers = get_signed_headers()  # {"X-MBX-APIKEY": ...}
+
+    total = 0.0
+    page_guard = 0
+    cursor = start_ms
+    sym = _normalize_symbol(symbol) if symbol else None
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        while True:
+            page_guard += 1
+            if page_guard > 20:  # emniyet: 20k kayıt ~ 20 sayfa
+                break
+
+            params = {
+                "timestamp": ts,
+                "recvWindow": 5000,
+                "incomeType": "REALIZED_PNL",
+                "limit": 1000,
+                "startTime": cursor,
+            }
+            if end_ms:
+                params["endTime"] = end_ms
+            if sym:
+                params["symbol"] = sym
+
+            # İmza **parametrelerin sıralı hali** üzerinden
+            query = urlencode(sorted(params.items()))
+            sig = sign_payload(params)
+            r = await client.get(f"{url}?{query}&signature={sig}", headers=headers)
+            r.raise_for_status()
+            rows = r.json() or []
+            if not isinstance(rows, list) or not rows:
+                break
+
+            # Toplamı ekle; bir sonraki sayfa için zaman imlecini güncelle
+            last_time = cursor
+            for it in rows:
+                try:
+                    # Sadece REALIZED_PNL; diğer income türlerini dahil etmiyoruz
+                    if str(it.get("incomeType", "")).upper() != "REALIZED_PNL":
+                        continue
+                    total += float(it.get("income", 0) or 0)
+                    t = int(it.get("time") or 0)
+                    if t > last_time:
+                        last_time = t
+                except Exception:
+                    continue
+
+            # Sayfalama: bir sonraki sorgu, son kaydın +1 ms'inden
+            # (Binance aynı ms'teki kayıtları tekrar döndürmesin diye)
+            if last_time <= cursor:
+                break
+            cursor = last_time + 1
+    return float(total)
 
 
 def _split_symbol_tokens(s: str) -> Optional[Tuple[str, str]]:

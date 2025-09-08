@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.schemas import WebhookSignal
 from app.database import get_db
 from app.handlers.signal_handler import handle_signal
+from app.security.fm_guard import ensure_authorized_fund_manager
 
 router = APIRouter(prefix="/webhook", tags=["Webhook"])
 
@@ -14,6 +15,5 @@ router = APIRouter(prefix="/webhook", tags=["Webhook"])
 async def receive_webhook(
     signal: WebhookSignal, db: AsyncSession = Depends(get_db)
 ) -> dict:
-    # public_id = await handle_signal(signal, db)
-    # return {"public_id": public_id}
+    ensure_authorized_fund_manager(signal.fund_manager_id)
     return await handle_signal(signal, db)
