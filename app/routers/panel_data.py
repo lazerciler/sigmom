@@ -402,7 +402,6 @@ async def overview_public(
 # Bakiye (borsa-agnostik) — iş mantığı account.py’de
 @router.get("/balance")
 async def me_balance(
-    # exchange: str = Query(settings.DEFAULT_EXCHANGE, description=f"{settings.DEFAULT_EXCHANGE}"),
     exchange: str = Query(
         settings.DEFAULT_EXCHANGE,
         description=f"Varsayılan: {settings.DEFAULT_EXCHANGE} · Örn: binance_futures_testnet",
@@ -631,14 +630,24 @@ async def me_unrealized(
 
 
 # ------------------------- Net PnL (borsa-onaylı) ---------------------------
+# @router.get("/netpnl")
+# async def me_netpnl(
+#     exchange: str = Query(settings.DEFAULT_EXCHANGE),
+#     symbol: Optional[str] = Query(None),
+#     since_days: Optional[int] = Query(None, ge=1, le=3650),
+#     since_epoch: Optional[int] = Query(None, description="Unix saniye"),
+#     db: AsyncSession = Depends(get_db),
+# ):
 @router.get("/netpnl")
 async def me_netpnl(
     exchange: str = Query(settings.DEFAULT_EXCHANGE),
     symbol: Optional[str] = Query(None),
     since_days: Optional[int] = Query(None, ge=1, le=3650),
     since_epoch: Optional[int] = Query(None, description="Unix saniye"),
+    detail: bool = Query(False, description="Komisyon/funding ayrıntılarını da döndür"),
     db: AsyncSession = Depends(get_db),
 ):
+
     ex = exchange
     sym = symbol.upper() if symbol else None
     now = datetime.now(timezone.utc)
@@ -676,24 +685,143 @@ async def me_netpnl(
         }
 
     # 3) Borsa onaylı gelirleri topla (income_summary)
+    # 3) Borsa onaylı gelirleri topla (income_summary / income_breakdown)
+    # try:
+    #     mod = importlib.import_module(f"app.exchanges.{ex}.account")
+    #     fn = getattr(mod, "income_summary", None)
+    #     if not callable(fn):
+    #         raise RuntimeError(f"{ex}.account içinde income_summary(...) yok")
+    #
+    #     if inspect.iscoroutinefunction(fn):
+    #         total = await fn(symbol=sym, since=since_dt, until=None)
+    #     else:
+    #         total = fn(symbol=sym, since=since_dt, until=None)
+    #
+    #     total = float(total or 0)
+    #     return {
+    #         "net": total,
+    #         "window": {"since": since_dt.isoformat(), "until": now.isoformat()},
+    #         "exchange": ex,
+    #         "symbol": sym,
+    #         "source": "exchange-income",
+    #     }
+    # except Exception as e:
+    #     raise HTTPException(status_code=400, detail=str(e))
+
+    # 3) Borsa onaylı gelirleri topla (önce account, sonra order_handler fallback)
     try:
-        mod = importlib.import_module(f"app.exchanges.{ex}.account")
-        fn = getattr(mod, "income_summary", None)
-        if not callable(fn):
-            raise RuntimeError(f"{ex}.account içinde income_summary(...) yok")
 
-        if inspect.iscoroutinefunction(fn):
-            total = await fn(symbol=sym, since=since_dt, until=None)
-        else:
-            total = fn(symbol=sym, since=since_dt, until=None)
+        def _norm_keys(d: dict) -> dict:
+            out = {}
+            for k, v in (d or {}).items():
+                kk = str(k).lower().strip()
+                # Binance incomeType normalizasyonu
+                if kk in (
+                    "commission",
+                    "fees",
+                    "fee",
+                    "trading_fee",
+                    "makercommission",
+                    "takercommission",
+                    "maker_commission",
+                    "taker_commission",
+                ):
+                    key = "commission"
+                elif kk in ("funding", "funding_fee", "fundingfee"):
+                    key = "funding"
+                elif kk in ("realized", "realized_pnl", "trade_pnl", "realizedpnl"):
+                    key = "realized"
+                else:
+                    key = kk
+                try:
+                    out[key] = float(v or 0.0)
+                except Exception:
+                    out[key] = 0.0
+            return out
 
-        total = float(total or 0)
-        return {
-            "net": total,
+        total_val: float = 0.0
+        breakdown: Optional[dict] = None
+
+        # 3a) account.income_breakdown / income_summary
+        acc = importlib.import_module(f"app.exchanges.{ex}.account")
+        # a1) breakdown varsa onu kullan (detail istenmişse)
+        if (
+            detail
+            and hasattr(acc, "income_breakdown")
+            and callable(getattr(acc, "income_breakdown"))
+        ):
+            fn_bd = getattr(acc, "income_breakdown")
+            res = (
+                await fn_bd(symbol=sym, since=since_dt, until=None)
+                if inspect.iscoroutinefunction(fn_bd)
+                else fn_bd(symbol=sym, since=since_dt, until=None)
+            )
+            if isinstance(res, dict) and ("total" in res or "breakdown" in res):
+                total_val = float(res.get("total", 0.0) or 0.0)
+                breakdown = (
+                    res.get("breakdown") or res.get("types") or res.get("detail")
+                )
+            elif isinstance(res, (list, tuple)) and len(res) >= 2:
+                total_val = float(res[0] or 0.0)
+                breakdown = res[1]
+            elif isinstance(res, dict):
+                breakdown = res
+                total_val = float(sum(float(x or 0.0) for x in res.values()))
+
+        # a2) hâlâ yoksa summary dene
+        if breakdown is None:
+            fn_sum = getattr(acc, "income_summary", None)
+            if callable(fn_sum):
+                res = (
+                    await fn_sum(symbol=sym, since=since_dt, until=None)
+                    if inspect.iscoroutinefunction(fn_sum)
+                    else fn_sum(symbol=sym, since=since_dt, until=None)
+                )
+                if isinstance(res, dict) and ("total" in res or "breakdown" in res):
+                    total_val = float(res.get("total", 0.0) or 0.0)
+                    breakdown = res.get("breakdown") or res.get("types")
+                elif isinstance(res, (list, tuple)) and len(res) >= 2:
+                    total_val = float(res[0] or 0.0)
+                    breakdown = res[1]
+                else:
+                    # sadece toplam (float) dönmüş olabilir
+                    try:
+                        total_val = float(res or 0.0)
+                    except Exception:
+                        total_val = 0.0
+
+        # 3b) order_handler.income_summary (start_ms/end_ms) → sum ile breakdown veriyor
+        if detail and breakdown is None:
+            try:
+                oh = importlib.import_module(f"app.exchanges.{ex}.order_handler")
+                oh_fn = getattr(oh, "income_summary", None)
+                if callable(oh_fn):
+                    start_ms = int(since_dt.timestamp() * 1000)
+                    end_ms = int(now.timestamp() * 1000)
+                    res = (
+                        await oh_fn(start_ms=start_ms, end_ms=end_ms, symbol=sym)
+                        if inspect.iscoroutinefunction(oh_fn)
+                        else oh_fn(start_ms=start_ms, end_ms=end_ms, symbol=sym)
+                    )
+                    # Beklenen: {"success": True, "net": x, "sum": {...}}
+                    if isinstance(res, dict):
+                        if "net" in res:
+                            total_val = float(res.get("net") or 0.0)
+                        if "sum" in res and isinstance(res["sum"], dict):
+                            breakdown = res["sum"]
+            except ImportError:
+                pass
+
+        # Çıktıyı hazırla
+        out = {
+            "net": float(total_val or 0.0),
             "window": {"since": since_dt.isoformat(), "until": now.isoformat()},
             "exchange": ex,
             "symbol": sym,
             "source": "exchange-income",
         }
+        if detail and breakdown:
+            out["breakdown"] = _norm_keys(breakdown)
+        return out
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

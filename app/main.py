@@ -26,8 +26,8 @@ from app.routers import auth_google
 from app.routers import admin_settings
 from app.routers import admin_referrals
 from app.routers import admin_test
-from app.routers import auth_logout
 from app.routers import market
+from app.routers import account
 from app.services.referral_maintenance import cleanup_expired_reserved
 
 
@@ -56,8 +56,9 @@ app.include_router(referral.router)
 app.include_router(admin_settings.router)
 app.include_router(admin_referrals.router)
 app.include_router(admin_test.router)
-app.include_router(auth_logout.router)
 app.include_router(market.router)
+app.include_router(account.page_router)
+app.include_router(account.router)
 
 
 def setup_logging():
@@ -119,34 +120,58 @@ async def verifier_loop(poll_interval: int = 5, cleanup_interval_sec: int = 10 *
     last_cleanup_ts = 0.0
 
     while True:
-        verifier_logger.info("֍ verifier_loop iteration start")
+        try:
+            verifier_logger.info("֍ verifier_loop iteration start")
 
-        # 1) Trade doğrulama — kendi session'unda
-        async with async_session() as db:
-            for exchange_name in settings.active_exchanges:
-                await verifier_iteration(db, exchange_name)
+            # 1) Trade doğrulama — kendi session'unda
+            async with async_session() as db:
+                for exchange_name in settings.active_exchanges:
+                    await verifier_iteration(db, exchange_name)
 
-        # 2) Referral expiry cleanup — AYRI session
-        now_ts = time.monotonic()
-        if now_ts - last_cleanup_ts >= cleanup_interval_sec:
-            try:
-                async with async_session() as s:
-                    async with s.begin():
-                        n = await cleanup_expired_reserved(s)
-                if n:
-                    verifier_logger.info(
-                        "Referral expiry cleanup: %s satır temizlendi", n
-                    )
-            except Exception as exc:
-                verifier_logger.exception("Referral expiry cleanup hata: %s", exc)
-            last_cleanup_ts = now_ts
+            # 2) Referral expiry cleanup — AYRI session
+            now_ts = time.monotonic()
+            if now_ts - last_cleanup_ts >= cleanup_interval_sec:
+                try:
+                    async with async_session() as s:
+                        async with s.begin():
+                            n = await cleanup_expired_reserved(s)
+                    if n:
+                        verifier_logger.info(
+                            "Referral expiry cleanup: %s satır temizlendi", n
+                        )
+                except Exception as exc:
+                    verifier_logger.exception("Referral expiry cleanup hata: %s", exc)
+                last_cleanup_ts = now_ts
 
-        await asyncio.sleep(poll_interval)
+            await asyncio.sleep(poll_interval)
+        except asyncio.CancelledError:
+            verifier_logger.info("Verifier loop cancelled, shutting down.")
+            break
+        finally:
+            verifier_logger.info("֍ verifier_loop iteration end")
+
+    verifier_logger.info("Verifier loop terminated.")
 
 
 @app.on_event("startup")
 async def startup_event():
-    asyncio.create_task(verifier_loop())
+    # asyncio.create_task(
+    #     verifier_loop(poll_interval=settings.VERIFY_INTERVAL_SECONDS)
+    # )
+    app.state.verifier_task = asyncio.create_task(
+        verifier_loop(poll_interval=settings.VERIFY_INTERVAL_SECONDS)
+    )
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    task = getattr(app.state, "verifier_task", None)
+    if task:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            verifier_logger.info("Verifier task cancelled.")
 
 
 if __name__ == "__main__":

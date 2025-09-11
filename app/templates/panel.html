@@ -4,7 +4,6 @@
       data-equity-allowed="{{ (referral_verified | default(false)) | tojson }}">
 <head>
   <meta charset="utf-8"/>
-<!--  <meta name="viewport" content="width=device-width,initial-scale=1"/>-->
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
   <title>Sigmom • SAI Panel</title>
   <!-- Theme Boot -->
@@ -46,7 +45,9 @@
           {% else %}
             <span id="role-chip" class="chip bg-amber-50 dark:bg-amber-900/20 border-amber-300/50 text-amber-700 dark:text-amber-300">Standart üye</span>
           {% endif %}
-          <div class="text-sm hidden sm:block">⏻ {{ user.name or user.email }}</div>
+        <div class="text-sm hidden sm:block">{{ '🔓' if referral_verified else '🔒' }}
+          {{ user.name or user.email }}
+        </div>
           <a href="/auth/google/logout"
              class="h-9 px-3 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 transition
                     dark:border-slate-600 dark:text-slate-100 dark:hover:bg-slate-800
@@ -95,7 +96,7 @@
       <aside class="lg:col-span-4">
         <div class="card shadow-sm p-4">
       {% if not referral_verified %}
-          <h3 class="text-sm font-semibold mb-3">ℹ Statü</h3>
+          <h3 class="text-sm font-semibold mb-3">ⓘ Statü</h3>
 
           <dl class="text-sm grid grid-cols-3 gap-y-2">
             <dt class="col-span-1 text-slate-500">Hesap</dt>
@@ -309,7 +310,7 @@
   <!-- flags -->
   <script src="{{ url_for('static', path='js/panel_boot.js') }}?v=2" defer></script>
   <!-- Panel / Panel JS -->
-  <script src="{{ url_for('static', path='js/panel_main.js') }}?v=20250908a" defer></script>
+  <script src="{{ url_for('static', path='js/panel_main.js') }}?v=202509010a" defer></script>
   {% if referral_verified %}
   <script src="{{ url_for('static', path='js/panel_equity.js') }}?v=20250822eb" defer></script>
   {% endif %}

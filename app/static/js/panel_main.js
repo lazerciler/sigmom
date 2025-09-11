@@ -1,22 +1,23 @@
 // app/static/js/panel_main.js
-// Lightweight Charts tabanlı detaylı panel 2025/08/29
+// Lightweight Charts tabanlı detaylı panel 2025/09/10
 // flags fallback: boot gelmediyse HTML attribute'tan oku
 (() => {
   const r = document.documentElement;
   window.TRADES_ALLOWED ??= (r.getAttribute('data-trades-allowed') === 'true');
   window.EQUITY_ALLOWED ??= (r.getAttribute('data-equity-allowed') === 'true');
 })();
+
 (() => {
   // ==== build flags & timings ====
   const DEBUG = false;
-  const REFRESH_MS       = Number(localStorage.getItem('REFRESH_MS') || 4000);
+  const REFRESH_MS       = Number(localStorage.getItem('REFRESH_MS') || 5000);
   const OPEN_TRADES_MS   = 5000;
   const RECENT_TRADES_MS = 10000;
   const RECENT_TRADES_LIMIT = 50;
   const OPEN_TRADES_LIMIT = 50;
   const DEFAULT_SYMBOL = 'BTCUSDT';
   let usedFallbackSymbol = false;
-  // Misafir: kullanıcı yok → sadece son bar yön okunu görür
+  // Misafir: kullanıcı
   const GUEST = !window.TRADES_ALLOWED;
 
   // ==== Veri tazelik göstergesi ("Veri durumu") ====
@@ -30,25 +31,6 @@
   // === İKİ AYRI ENTRY LABEL (çizgisiz) ===
   const ENTRY_DRAW_LINES = true; // göstermek için true, gizlemek için false
   const ENTRY_LINE_STYLE = 'dashed'; // stil: 'dashed' veya 'solid'
-
-//  const ENTRY_OPTS = (side, price) => {
-//    const labelColor = side === 'short' ? '#ef4444' : '#10b981';
-//    // Çizgiyi sakla: lineVisible=false (desteklenmeyen sürümde fallback: şeffaf renk)
-//    const lineHiddenColor = 'rgba(0,0,0,0)';
-//    return {
-//      price,
-//      // kütüphane lineVisible'ı desteklemiyorsa çizgi zaten görünmez olacak:
-//      color: ENTRY_DRAW_LINES ? labelColor : lineHiddenColor,
-//      lineStyle: LightweightCharts.LineStyle.Solid,
-//      lineWidth: ENTRY_DRAW_LINES ? 1 : 1,
-//      lineVisible: ENTRY_DRAW_LINES,        // ← desteklenen sürümlerde kesin gizler
-//      axisLabelVisible: true,
-//      axisLabelColor: labelColor,           // etiketi kendi rengiyle göster
-//      title: side === 'short' ? '↓' : '↑',
-//    };
-//  };
-
-
   const ENTRY_OPTS = (side, price) => {
     const labelColor = side === 'short' ? '#ef4444' : '#10b981';
     return {
@@ -63,7 +45,6 @@
       title: side === 'short' ? '↓' : '↑',
     };
   };
-
 
   let entryLines = { long: null, short: null }; // {side: PriceLineHandle|null}
 
@@ -121,7 +102,7 @@
   function setFeedChip(text, tone) {
     const el = document.getElementById('feed-status');
     if (!el) return;
-    el.textContent = `Veri: ${text}`;
+    el.textContent = `Veri akışı: ${text}`;
     let cls = 'chip bg-slate-100 dark:bg-slate-800/60';
     if (tone === 'ok') {
       cls = 'chip bg-emerald-50 dark:bg-emerald-900/20 border-emerald-300/50 text-emerald-700 dark:text-emerald-300';
@@ -210,7 +191,7 @@ function ensureDefaultNoticeEl() {
 
 function showDefaultNotice(sym) {
   const el = ensureDefaultNoticeEl();
-  el.textContent =  `İlk sinyal bekleniyor...`; // : ${sym}`;
+  el.textContent =  `Sinyal bekleniyor...`; // : ${sym}`;
   el.classList.remove('hidden');
 }
 
@@ -557,7 +538,7 @@ async function bootstrapActiveSymbol() {
       showDefaultNotice(activeSymbol);
       // tooltip: çip üzerine sembol bilgisini koy
       const note = document.getElementById('default-note');
-      if (note) note.title = `Henüz bir sinyal alınmadı. Öntanımlı sembol gösteriliyor: ${activeSymbol}`;
+      if (note) note.title = `Sinyal bekleniyor. Öntanımlı sembol gösteriliyor: ${activeSymbol}`;
     }
   return activeSymbol;
  }
@@ -599,20 +580,72 @@ function snapToBar(sec, tfSec) { return Math.floor(sec / tfSec) * tfSec; }
   }
 // === EOF Markers ===
 
-  // i18n — tarayıcı dilini erkenden al (makeChart içinde kullanılıyor)
   const LOCALE = (navigator.languages && navigator.languages[0]) || navigator.language || 'en-US';
+  // Fiyatlar için anahtar:
+  //   'en-US'  → borsa gibi göster
+  //   'local'  → tarayıcı yereliyle göster
+  let PRICE_LOCALE_MODE = localStorage.getItem('priceLocaleMode') || 'en-US'; // 'en-US' | 'local'
+  const getPriceLocale = () => (PRICE_LOCALE_MODE === 'local' ? LOCALE : 'en-US');
+  // Sayılar (qty, PnL, KPI, fmtNum) da aynı moda tabi olsun:
+  const getNumLocale   = () => getPriceLocale();
+  // Basit API: konsoldan çağır — anında etkisini gör
+  window.setPriceLocaleMode = (mode) => {
+    PRICE_LOCALE_MODE = (mode === 'local' ? 'local' : 'en-US');
+    localStorage.setItem('priceLocaleMode', PRICE_LOCALE_MODE);
+    try {
+      loadOpenTrades(); loadRecentTrades(); loadOverview();
+      // QuickBalance otomatik event ile de tetikleniyor; garanti olsun
+      document.dispatchEvent(new Event('sig:price-locale-mode-changed'));
+    } catch {}
+  };
 
   // ==== i18n helpers ====
-  // Kullanıcının tarayıcı diline göre sayı formatı
-  const nf0 = new Intl.NumberFormat(LOCALE);
-  const nf2 = new Intl.NumberFormat(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  // Dinamik number formatters (mode değişince otomatik etkilenir)
+  const numFmt0 = () => new Intl.NumberFormat(getNumLocale());
+  const numFmt2 = () => new Intl.NumberFormat(getNumLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   // NOT: Yukarıda let olarak tanımlananlara burada atama yapıyoruz
-  fmtNum = (v) => (v == null ? '—' : nf0.format(Number(v)));
+  fmtNum = (v) => (v == null ? '—' : numFmt0().format(Number(v)));
   fmtPnl = (v) => {
     if (v == null) return '—';
-    const n = Number(v); const sign = n >= 0 ? '+' : '-';
-    return sign + nf2.format(Math.abs(n));
+    const n = Number(v); const sign = n >= 0 ? '+' : '−';
+    return sign + numFmt2().format(Math.abs(n));
   };
+
+  // --- Miktar için dinamik formatter ---
+  // 1'in altındaki miktarlarda 6 hane, aksi halde 3 hane göster
+  function fmtQty(v) {
+    if (v == null || v === '') return '—';
+    const n = Number(v);
+    if (!Number.isFinite(n)) return '—';
+    const abs = Math.abs(n);
+    const max = abs < 1 ? 6 : 3; // 8 yapılabilir
+    return new Intl.NumberFormat(getNumLocale(), {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: max
+    }).format(n);
+  }
+
+  // --- Fiyat için dinamik formatter (LOCALE bazlı) ---
+  // Büyük fiyatlarda daha az, mikro fiyatlarda daha çok hane göster.
+  function fmtPrice(v) {
+    if (v == null || v === '') return '—';
+    const n = Number(v);
+    if (!Number.isFinite(n)) return '—';
+    const abs = Math.abs(n);
+    let max;
+    if      (abs >= 1000) max = 2;
+    else if (abs >= 100)  max = 3;
+    else if (abs >= 1)    max = 4;
+    else if (abs >= 0.1)  max = 5;
+    else if (abs >= 0.01) max = 6;
+    else                  max = 8;
+
+    return new Intl.NumberFormat(getPriceLocale(), {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: max
+    }).format(n);
+  }
+
   // ISO string timezone içermiyorsa UTC varsay; yerel + UTC beraber göster
   // * ISO string timezone içermiyorsa UTC varsay; borsa tarafında TEK saat: UTC
   const parseIsoAsUtc = (s) => {
@@ -810,7 +843,6 @@ const fmtDateUTC = (ts) => {
     return null;
   }
 
-
 // ==== markers ====
 // Tüm geçmiş open/close işaretlerini çiz (tek contract: { symbol, tf })
 async function loadMarkers({ symbol, tf } = {}) {
@@ -944,9 +976,9 @@ async function loadOpenTrades() {
       row.append(
         $div('text-xs', t.symbol),
         $div(sideCls, side),
-        // position_size (veya backend başka isim verirse emniyetli fallback)
-        $div('text-xs', nf2.format(Number(t.position_size ?? t.size ?? 0))),
-        $div('text-xs', fmtNum(t.entry_price)),
+        // Miktar: küçük değerlerde 6 hane, büyüklerde 3
+        $div('text-xs', fmtQty(t.position_size ?? t.size)),
+        $div('text-xs', fmtPrice(t.entry_price)),
         $div('text-xs', `${t.leverage}x`),
         // Sağ tabloyla aynı: nowrap tarih (ellipsis/truncate yok)
         $div('text-xs text-slate-500 whitespace-nowrap', fmtDateUTC(t.timestamp))
@@ -1002,6 +1034,8 @@ async function loadOpenTrades() {
     const el = document.querySelector('#open-positions');
     if (el) el.textContent = '—';
     clearEntryLines();
+    // Hata olsa da Quick Balance güncelleyebilsin
+    try { document.dispatchEvent(new CustomEvent('sig:open-trades', { detail: { items: [] } })); } catch {}
     return [];
   }
 }
@@ -1031,8 +1065,8 @@ async function loadRecentTrades() {
       return [];
     }
 
-    const fmtMaybePrice = (v) => (v == null || v === '' ? '—' : nf2.format(Number(v)));
-
+    const fmtMaybePrice = (v) => (v == null || v === '' ? '—' : fmtPrice(v));
+    const fmtMaybeQty   = (v) => (v == null || v === '' ? '—' : fmtQty(v));
     // Güvenli DOM: header + satırlar
     el.textContent = '';
     const $div = (cls, text) => {
@@ -1061,7 +1095,6 @@ async function loadRecentTrades() {
     items.forEach(t => {
       const side = String(t.side || '').toUpperCase();
       const sideCls = side === 'LONG' ? 'text-xs text-emerald-500' : 'text-xs text-rose-400';
-
       const tsUTC = fmtDateUTC(pickTradeCloseTs(t));
       const row = $div('grid gap-2 py-1 border-b border-slate-200/40 dark:border-slate-700/40');
 
@@ -1070,7 +1103,8 @@ async function loadRecentTrades() {
       row.append(
         sym,
         $div(sideCls, side),
-        $div('text-xs', fmtMaybePrice(t.position_size)),
+        // Kapanmışlar tablosunda da miktarı dinamik göster
+        $div('text-xs', fmtMaybeQty(t.position_size)),
         $div('text-xs', fmtMaybePrice(t.entry_price)),
         $div('text-xs', fmtMaybePrice(t.exit_price)),
         $div('text-xs text-slate-500 whitespace-nowrap', tsUTC)
@@ -1111,8 +1145,9 @@ async function loadRecentTrades() {
   }
 
   // ==== sembol yönetimi ====
-  // (legacy formatPair tahmini) kaldırıldı; sembol backend'den geldiği gibi gösteriliyor.
-  function formatPair(sym) { return String(sym ?? ''); }
+  function formatPair(sym) {
+  return String(sym ?? '');
+  }
 
   function updateSymbolLabel(sym) {
     const el = document.querySelector('#symbol-label');
@@ -1166,7 +1201,6 @@ async function loadRecentTrades() {
   });
 
   // ==== çalıştır ====
-
   // İlk açılışta mevcut TF’yi işaretle
   highlightActiveTf(klTf);
   makeChart();
@@ -1222,6 +1256,20 @@ async function loadRecentTrades() {
 
   // ===== HIZLI BAKİYE ÖZETİ =====
   (function wireQuickBalance(){
+    let nf2QB = new Intl.NumberFormat(getNumLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const fmt2  = (v) => nf2QB.format(v || 0);
+
+    // Mode değişince Quick Balance formatter’ını tazele
+    document.addEventListener('sig:price-locale-mode-changed', () => {
+      nf2QB = new Intl.NumberFormat(getNumLocale(), { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    });
+
+    // Güvenli sayı çevirici (net toplarken ve son kapananda kullanılıyor)
+    const safeNum = (v) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : 0;
+    };
+
     // Aktif sembolün borsasını açık pozisyonlardan bul (modüler)
     function getActiveExchange(sym) {
       try {
@@ -1328,14 +1376,8 @@ async function loadRecentTrades() {
     const rowUpS = document.getElementById('qb-upnl-short-row');
     const elOpen = document.getElementById('qb-open');
     const elLast = document.getElementById('qb-last');
+
     if (!elNet || !elOpen || !elLast) return;
-    // Quick Balance'a özel formatter (global nf2 ile karışmasın)
-    const nf2QB = new Intl.NumberFormat(LOCALE, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const fmt2  = (v) => nf2QB.format(v || 0);
-    const safeNum = (v) => {
-      if (v == null || v === '' || Number.isNaN(+v)) return 0;
-      return +v;
-    };
     // Öncelikli alan: realized_pnl; diğer isimler olursa temkinli fallback
     const pickPnl = (t) => (
       t?.realized_pnl ??
@@ -1426,7 +1468,6 @@ async function loadRecentTrades() {
         elNet.textContent  = (Number(net) === 0 ? '0' : (net > 0 ? '+' : '−') + fmt2(Math.abs(Number(net))));
         elOpen.textContent = String(openCnt);
 
-//          if (openCnt > 0) {
         if (openCnt > 0) {
             // Önce aynı çağrıdan gelen liste → sonra cache → en son tek yedek fetch
             let openRowsForActive = Array.isArray(openRowsAll)
@@ -1439,9 +1480,6 @@ async function loadRecentTrades() {
                 String(t?.symbol||'').toUpperCase() === String(activeSymbol).toUpperCase()
               );
             }
-            // Not: openRowsAll ve OPEN_TRADES_CACHE dışına TAŞMA; ikinci fetch yok.
-
-            // Önce "all=" olmadan dene (legs varsa direkt okuyacağız), olmadıysa all=1 → aggregate
             // L/S kırılımı için başlangıç objesi (toplam yok; sıfır)
             let bd = { long: 0, short: 0, hasLong: false, hasShort: false };
             let lastPayload = null; // gerektiğinde toplamı çıkarmak için
@@ -1554,17 +1592,14 @@ async function loadRecentTrades() {
         if (net > 0) elNet.classList.add('text-emerald-500');
         else if (net < 0) elNet.classList.add('text-rose-400');
 
-        // // Cüzdan: backend’den sembole göre (quote çıkarımı server’da)
         // Cüzdan: backend’den sembole & exchange’e göre
         if (elWallet) {
           let shown = null;
+          let isSim = false; // fallback mı?
           try {
             const ex = getActiveExchange(activeSymbol);
             const qs = new URLSearchParams({ symbol: String(activeSymbol).toUpperCase() });
             if (ex) qs.set('exchange', ex);
-//            const r  = await fetch('/api/me/balance?' + qs.toString(), {
-//              credentials: 'include', headers: { 'Accept': 'application/json' }
-//            });
             qs.set('_', Date.now().toString());               // cache-buster
             const r  = await fetch('/api/me/balance?' + qs.toString(), {
               credentials: 'include',
@@ -1581,37 +1616,36 @@ async function loadRecentTrades() {
             if (!silent) showStatus('Bağlantı yok (simülasyon)','err');
             const START_CAP = (typeof window.START_CAPITAL === 'number') ? window.START_CAPITAL : 1000;
             shown = START_CAP + (Number(net) || 0);
-            // simüle modda renk: başlangıcın üstü/altı
-            elWallet.classList.remove('text-emerald-500','text-rose-400');
-            if (shown > START_CAP) elWallet.classList.add('text-emerald-500');
-            else if (shown < START_CAP) elWallet.classList.add('text-rose-400');
+//            // simüle modda renk: başlangıcın üstü/altı
+//            elWallet.classList.remove('text-emerald-500','text-rose-400');
+//            if (shown > START_CAP) elWallet.classList.add('text-emerald-500');
+//            else if (shown < START_CAP) elWallet.classList.add('text-rose-400');
+            isSim = true;
           } else {
-            // gerçek bakiye → nötr renk
-            elWallet.classList.remove('text-emerald-500','text-rose-400');
+//            // gerçek bakiye → nötr renk
+//            elWallet.classList.remove('text-emerald-500','text-rose-400');
+            // gerçek bakiye
           }
-          elWallet.textContent = fmt2(shown || 0);
+//          elWallet.textContent = fmt2(shown || 0);
+          // Renk ve metin: gerçek → nötr, simülasyon → gri + "≈"
+          elWallet.classList.remove('text-emerald-500','text-rose-400','text-slate-400');
+          if (isSim) elWallet.classList.add('text-slate-400');
+          elWallet.textContent = (isSim ? '≈ ' : '') + fmt2(shown || 0);
+          elWallet.title = isSim
+            ? 'Canlı güncelleme başarısız' //'Simülasyon (balance API başarısız): START_CAPITAL + Net PnL'
+            : 'Aktif cüzdan bakiyesi';
         }
-        // a11y: güncellendi bilgisi
-        if (a11y) a11y.textContent = 'Hızlı bakiye özeti güncellendi.';
-        // durum: yenilendi (kısa süre göster)
-        if (!silent && Number.isFinite(shown)) showStatus('Yenilendi','ok');
-      } catch {
-//        // sessiz
-//        if (!silent) showStatus('Hata','err');
-        // manuel durum mesajları kaldırıldı
+       } catch {
       }
     }
-
-//    btnRef?.addEventListener('click', (e) => {
-//      e.preventDefault();
-//      if (a11y) a11y.textContent = 'Yenileniyor…';
-//      loadQuickBalance({ silent: false });  // manuel yenileme
-//    });
     // Açık pozisyon push sinyali geldiğinde sessiz güncelle
     document.addEventListener('sig:open-trades', () => loadQuickBalance({ silent: true }));
     // İlk yükleme: activeSymbol hazır değilse bekle
     if (activeSymbol) loadQuickBalance({ silent: true });
     else document.addEventListener('sig:active-ready', () => loadQuickBalance({ silent: true }), { once: true });
+
+    // Veri akışı kopukken de canlı tutmak için periyodik yedek tetikleyici
+    setInterval(() => loadQuickBalance({ silent: true }), Math.max(OPEN_TRADES_MS, 7000));
   })();
 
   // ==== Referans Kodu Modalı (frontend) ====

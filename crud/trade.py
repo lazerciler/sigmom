@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 # crud/trade.py
 # Python 3.9
+
 from decimal import Decimal, InvalidOperation
 import uuid
 import logging
 from datetime import datetime, timedelta
+import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, update, desc, func
 from typing import Union, Optional
@@ -57,10 +59,13 @@ def pick_close_price(position_data: dict) -> Decimal:
         v = position_data.get(key)
         if v is None or str(v).strip() == "":
             continue
-        d = Decimal(str(v))
+        try:
+            d = Decimal(str(v))
+        except InvalidOperation:
+            raise ValueError(f"Invalid close_price value: {v}")
         if d > 0:
             return d
-    raise ValueError(f"Geçerli close_price bulunamadı: position_data={position_data}")
+    raise ValueError(f"No valid close_price found: position_data={position_data}")
 
 
 def compute_pnl(
@@ -76,11 +81,12 @@ def compute_pnl(
 
 async def get_open_trade_for_close(
     db: AsyncSession,
-    public_id: Optional[str],  # str | None yerine Optional[str]
+    public_id: Optional[str],
     symbol: str,
     exchange: str,
-) -> Union[StrategyOpenTrade, None]:  # StrategyOpenTrade | None yerine
-    # if public_id:
+    fund_manager_id: Optional[str] = None,
+    side: Optional[str] = None,
+) -> Union[StrategyOpenTrade, None]:
     """
     Close sinyali geldiğinde kapatılacak open trade'i güvenli biçimde seçer.
     - Öncelik public_id (tekil ve güvenli).
@@ -99,20 +105,18 @@ async def get_open_trade_for_close(
         res = await db.execute(q)
         return res.scalar_one_or_none()
 
-    # Fallback: latest OPEN by symbol+exchange (case-insensitive symbol)
-    q = (
-        select(StrategyOpenTrade)
-        .where(
-            func.upper(StrategyOpenTrade.symbol) == sym,
-            StrategyOpenTrade.exchange == ex,
-            StrategyOpenTrade.status == "open",
-        )
-        .order_by(
-            desc(StrategyOpenTrade.id)
-        )  # id is monotonic; avoids timestamp issues
-    )
-
+    conds = [
+        func.upper(StrategyOpenTrade.symbol) == sym,
+        StrategyOpenTrade.exchange == ex,
+        StrategyOpenTrade.status == "open",
+    ]
+    if fund_manager_id:
+        conds.append(StrategyOpenTrade.fund_manager_id == fund_manager_id.strip())
+    if side:
+        conds.append(StrategyOpenTrade.side == side.strip().lower())
+    q = select(StrategyOpenTrade).where(*conds).order_by(desc(StrategyOpenTrade.id))
     res = await db.execute(q)
+
     return res.scalars().first()
 
 
@@ -128,20 +132,28 @@ async def close_open_trade_and_record(
     logger = logging.getLogger("verifier")
 
     try:
-        # Row lock: aynı trade'i paralel kapanışlardan koru
+        # 1) ATOMİK DURUM GEÇİŞİ: OPEN → CLOSED (koşullu UPDATE)
+        #    Aynı anda iki taraf denese de yalnız biri 1 satır etkiler; diğeri 0 satır görür.
+        res = await db.execute(
+            update(StrategyOpenTrade)
+            .where(
+                StrategyOpenTrade.id == trade.id,
+                StrategyOpenTrade.status == "open",
+            )
+            .values(status="closed")
+        )
+        if (res.rowcount or 0) == 0:
+            # Başkası bizden önce kapatmış; tekrar trade yazmayalım.
+            logger.info(f"[idempotent-skip] already closed → {trade.public_id}")
+            await db.rollback()  # bu fonksiyon içinde değişiklik yapmadık; güvenli
+            return
+
+        # 2) Kayıt kapandıktan sonra güncel halini getir (audit için)
         trade = (
             await db.execute(
-                select(StrategyOpenTrade)
-                .where(StrategyOpenTrade.id == trade.id)
-                .with_for_update()
+                select(StrategyOpenTrade).where(StrategyOpenTrade.id == trade.id)
             )
         ).scalar_one()
-        # Idempotency: zaten closed ise ikinci kez işlem yapma
-        if (getattr(trade, "status", "") or "").lower() == "closed":
-            logger.warning(
-                f"[idempotent-skip] {trade.symbol} already CLOSED → {trade.public_id}"
-            )
-            return
 
         # --- SAFE close price: asla entryPrice/0 değil ---
         close_price = pick_close_price(position_data)
@@ -205,15 +217,15 @@ async def close_open_trade_and_record(
             },
         )
 
-        # Trade tablosuna ekle
+        # 3) Trade tablosuna ekle
         db.add(closed_trade)
         await db.flush()
 
-        # Açık pozisyonu silme → status='closed' yap
-        trade.status = "closed"
-        await db.flush()
+        # # Açık pozisyonu silme → status='closed' yap
+        # trade.status = "closed"
+        # await db.flush()
 
-        # Commit kontrolü
+        # 4) Commit
         try:
             await db.commit()
         except Exception as e:
@@ -351,9 +363,7 @@ async def verify_pending_trades_for_execution(
             continue
 
         verifier_logger.debug(f"[position] {open_trade.symbol}: {position!r}")
-        verifier_logger.debug(
-            f"📦 Position was brought: {open_trade.symbol} → {position}"
-        )
+        verifier_logger.debug(f"Position was brought: {open_trade.symbol} → {position}")
 
         if not position:
             verifier_logger.warning(
@@ -361,7 +371,7 @@ async def verify_pending_trades_for_execution(
             )
             continue
 
-        # ✅ Yeni signature ile kullan
+        # Yeni signature ile kullan
         if position_matches(position):
             open_trade.status = "open"
             open_trade.exchange_verified = True
@@ -375,7 +385,7 @@ async def verify_pending_trades_for_execution(
             if open_trade.verification_attempts >= max_retries:
                 open_trade.status = "failed"
                 verifier_logger.warning(
-                    f"[failed] ❌ {open_trade.symbol} max retries "
+                    f"[failed] {open_trade.symbol} max retries "
                     f"({max_retries}) exceeded, position is invalid."
                 )
             else:
@@ -386,6 +396,77 @@ async def verify_pending_trades_for_execution(
 
         open_trade.last_checked_at = now
         await db.commit()
+
+
+# -------------------- CLOSE doğrulama / retry --------------------
+async def verify_close_after_signal(
+    db: AsyncSession,
+    execution,
+    *,
+    public_id: Optional[str],
+    symbol: str,
+    exchange: str,
+    max_retries: int = 5,
+    interval_seconds: float = 2.0,
+) -> bool:
+    """
+    Close sinyali atıldıktan sonra borsayı kontrol eder.
+    - Kapanış doğrulanırsa: close_open_trade_and_record(...) çağrılır ve True döner.
+    - Kapanmazsa: birkaç kez yeniden dener; sonunda açık bırakır ve False döner.
+    Şema değişikliği yok; mevcut verification_attempts/last_checked_at alanlarını kullanır.
+    """
+    open_trade = await get_open_trade_for_close(db, public_id, symbol, exchange)
+    if not open_trade:
+        return False
+
+    # Çoktan kaydedilmişse hiç uğraşma
+    ex_q = await db.execute(
+        select(func.count())
+        .select_from(StrategyTrade)
+        .where(StrategyTrade.open_trade_public_id == open_trade.public_id)
+    )
+    if (ex_q.scalar_one() or 0) > 0:
+        # statü açık kalmışsa kapat
+        if (open_trade.status or "").lower() != "closed":
+            open_trade.status = "closed"
+            await db.flush()
+        return True
+
+    for _ in range(max_retries):
+        # now = datetime.utcnow()
+        # Pozisyonu getir
+        try:
+            position = await execution.order_handler.get_position(symbol)
+        except Exception as e:
+            logging.getLogger("verifier").warning(
+                f"[close-check] get_position({symbol}) ex: {e}"
+            )
+            position = None
+
+        # KAPANDI mı? (one-way için net 0, hedge için kaba yaklaşım: işaret değişti ya da 0)
+        amt = Decimal(str((position or {}).get("positionAmt", 0)))
+        side = (open_trade.side or "").lower()
+        closed = (
+            (amt == 0)
+            or (side == "long" and amt <= 0)
+            or (side == "short" and amt >= 0)
+        )
+
+        if closed:
+            await close_open_trade_and_record(db, open_trade, position or {})
+            await db.commit()
+            return True
+
+        # Kapanmamışsa deneme sayacı/son kontrol zamanı güncelle
+        await increment_attempt_count(db, open_trade.id)
+        await db.commit()
+        await asyncio.sleep(interval_seconds)
+
+    # Hâlâ kapanmadı → açık bırak, logla
+    logging.getLogger("verifier").warning(
+        f"[close-timeout] {symbol} not closed after {max_retries} tries; keeping OPEN."
+    )
+    return False
 
 
 async def insert_strategy_trade_from_open(

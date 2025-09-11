@@ -4,7 +4,7 @@
 import logging
 import asyncio
 from decimal import Decimal
-from typing import Optional, Dict, Set, Tuple
+from typing import Optional, Dict
 
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,41 +21,8 @@ from crud.trade import (
     verify_close_after_signal,
 )
 from app.utils.position_utils import confirm_open_trade
-from app.database import async_session
-
 
 logger = logging.getLogger(__name__)
-
-# Aynı close için birden çok arka plan doğrulama görevi açılmasını engelle:
-# Anahtar: (exchange, symbol_upper, public_id)
-RUNNING_CLOSE_CHECKS: Set[Tuple[str, str, str]] = set()
-
-
-async def _bg_verify_close(execution, public_id, symbol, exchange):
-    """
-    Close sinyalinden sonra borsayı kısa süre aralıklarla kontrol eder.
-    Aynı (exchange, symbol, public_id) için bir tane görev koşmasına izin verir.
-    """
-    key = (str(exchange or ""), str(symbol or "").upper(), str(public_id or ""))
-    if key in RUNNING_CLOSE_CHECKS:
-        logger.info("[bg] skip duplicate close-check %s", key)
-        return
-    RUNNING_CLOSE_CHECKS.add(key)
-    try:
-        async with async_session() as s:
-            await verify_close_after_signal(
-                s,
-                execution,
-                public_id=public_id,
-                symbol=symbol,
-                exchange=exchange,
-                max_retries=5,
-                interval_seconds=0.5,
-            )
-    except Exception:
-        logger.exception("[bg] verify_close_after_signal crashed")
-    finally:
-        RUNNING_CLOSE_CHECKS.discard(key)
 
 
 async def _force_sync_qty(
@@ -175,6 +142,15 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
             status_code=400,
             detail="Limit orders are not currently supported by the system.",
         )
+
+    # if signal_data.order_type.lower() not in ("market", "limit"):
+    #     logger.warning(
+    #         "Only market or limit orders are supported. The transaction was rejected."
+    #     )
+    #     raise HTTPException(
+    #         status_code=400,
+    #         detail="Only market or limit orders are supported.",
+    #     )
 
     # Borsa modülünü yükle
     try:
@@ -403,6 +379,23 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
         except Exception:
             position_mode = "one_way"
 
+        # desired_side = _canon_side(getattr(signal_data, "side", None))
+        # if (
+        #     position_mode == "hedge"
+        #     and desired_side
+        #     and open_trade is not None
+        #     and open_trade.side != desired_side
+        # ):
+        #     cand = await find_merge_candidate(
+        #         db,
+        #         symbol=signal_data.symbol,
+        #         exchange=signal_data.exchange,
+        #         side=desired_side,
+        #         fund_manager_id=signal_data.fund_manager_id,
+        #     )
+        #     if cand:
+        #         open_trade = cand
+
         desired_side = _canon_side(getattr(signal_data, "side", None))
         if position_mode == "hedge" and desired_side:
             if open_trade is None or open_trade.side != desired_side:
@@ -463,16 +456,29 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
             await confirm_open_trade(db, open_trade, pos_after)
             await _force_sync_qty(db, open_trade.id, pos_after)
             await db.commit()
-            asyncio.create_task(
-                _bg_verify_close(
-                    execution,
-                    open_trade.public_id,
-                    signal_data.symbol,
-                    signal_data.exchange,
-                )
+            # return {
+            #     "success": True,
+            #     "message": "Position reduced and synced with the exchange.",
+            #     "public_id": open_trade.public_id,
+            # }
+            # Ardından kısa bir onay penceresi: kapanış tamamlandı mı diye yeniden dene
+            ok = await verify_close_after_signal(
+                db,
+                execution,
+                public_id=open_trade.public_id,
+                symbol=signal_data.symbol,
+                exchange=signal_data.exchange,
+                max_retries=5,
+                interval_seconds=0.5,
             )
+            if ok:
+                return {
+                    "success": True,
+                    "message": "Position closed after short retry window.",
+                    "public_id": open_trade.public_id,
+                }
             return {
                 "success": True,
-                "message": "Position reduced and synced; background close check started.",
+                "message": "Position reduced and synced; close confirmation pending.",
                 "public_id": open_trade.public_id,
             }

@@ -19,7 +19,7 @@
     <header class="px-6 py-4 border-b bg-white dark:bg-slate-800 dark:border-slate-700 flex items-center justify-between rounded-xl">
       <div>
         <h1 class="text-2xl font-semibold">
-          <a href="/admin/settings" title="Yönetici Ayarları"><span role="button" style="color: #26c952;">⏻</span></a> Referans Yönetimi</h1>
+          <a href="/admin/settings" title="Yönetici Ayarları"><span role="button" style="color: #26c952;">🛠️</span></a> Referans Yönetimi</h1>
         <p class="text-sm text-slate-500 dark:text-slate-400">
           Kodlar veritabanında <em>hash</em> olarak saklanır; plaintext yalnızca indirilen dosyada bulunur.
         </p>
@@ -84,14 +84,14 @@
             class="grid gap-4 md:grid-cols-4" autocomplete="off">
         <label class="block">
           <span class="text-sm text-slate-600 dark:text-slate-300">Adet</span>
-          <input name="count" type="number" min="1" max="100" value="10"
-                 class="mt-1 w-full h-10 px-3 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700">
+          <input name="count" type="number" min="1" max="100" value="1"
+                 class="mt-1 w-full h-10 px-3 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700" required>
         </label>
 
         <label class="block">
           <span class="text-sm text-slate-600 dark:text-slate-300">Geçerlilik (gün)</span>
           <input name="days" type="number" min="1" max="180" value="14"
-                 class="mt-1 w-full h-10 px-3 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700">
+                 class="mt-1 w-full h-10 px-3 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700" required>
         </label>
 
         <label class="block md:col-span-2">
@@ -105,7 +105,7 @@
           <input type="hidden" name="mode" value="download">
           <button type="submit" id="csv-download"
                   class="h-10 px-4 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">
-            Kodları Üret ve CSV İndir
+            Üret ve CSV İndir
           </button>
 
           <!-- ZIP (parolalı) -->
@@ -114,7 +114,7 @@
                    class="h-10 px-3 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700">
             <button type="submit" id="zip-download"
                     class="h-10 px-4 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">
-              Kodları Üret ve ZIP İndir
+              Üret ve ZIP İndir
             </button>
           </div>
 

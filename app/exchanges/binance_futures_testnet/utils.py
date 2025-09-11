@@ -80,7 +80,7 @@ async def set_leverage(symbol: str, leverage: int) -> dict:
         lev = max(1, min(125, int(leverage)))
     except Exception:
         return {"success": False, "message": "invalid leverage"}
-    logger.info("Binance API → leverage ayarı başlıyor: %s x%s", sym, lev)
+    logger.info("Binance API → Leverage adjustment begins: %s x%s", sym, lev)
     endpoint = ENDPOINTS["LEVERAGE"]
     url = BASE_URL + endpoint
 
@@ -106,7 +106,9 @@ async def set_leverage(symbol: str, leverage: int) -> dict:
             resp.raise_for_status()
 
             data = resp.json()
-            logger.info("Binance API → kaldıraç ayarı başarılı: %s x%s", sym, lev)
+            logger.info(
+                "Binance API → Leverage adjustment successful: %s x%s", sym, lev
+            )
             return {"success": True, "data": data}
     except httpx.HTTPStatusError as exc:
         logger.error(

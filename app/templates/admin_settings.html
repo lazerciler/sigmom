@@ -6,9 +6,9 @@
   <title>Admin • Settings</title>
 
   <!-- Theme Boot -->
-  <script src="{{ url_for('static', path='js/theme_boot.js') }}?v=1a"></script>
+  <script src="{{ url_for('static', path='js/theme_boot.js') }}?v=1b"></script>
   <!-- Tailwind (projedeki build) -->
-  <link rel="stylesheet" href="{{ url_for('static', path='css/tw.css') }}?v=4l">
+  <link rel="stylesheet" href="{{ url_for('static', path='css/tw.css') }}?v=5a">
 
   <style>
     .badge{display:inline-flex;align-items:center;justify-content:center;
@@ -23,26 +23,25 @@
     <header class="px-6 py-4 border-b bg-white dark:bg-slate-800 dark:border-slate-700 rounded-xl
                    flex items-center justify-between">
       <div>
-        <h1 class="text-2xl font-semibold">Yönetici Ayarları</h1>
+        <h1 class="text-2xl font-semibold"><span style="color: #26c952;">🛠️</span> Yönetici Ayarları</h1>
         <p class="text-sm text-slate-500 dark:text-slate-400">
-          <span style="color: #26c952;">⏻</span>
           <strong>{{ me_name or (me.name or me.email) }}</strong>
         </p>
       </div>
       <a href="/" title="Panel Ana Sayfa">
             <button id="home"
-              class="h-8 w-8 rounded-lg border border-slate-300 dark:border-slate-600">🌎</button>
+              class="h-8 w-8 rounded-lg border border-slate-300 dark:border-slate-600">&nbsp;🌎&nbsp;</button>
       </a>
       <a href="/admin/test" title="Webhook Test Paneli">
             <button id="test"
-              class="h-8 w-8 rounded-lg border border-slate-300 dark:border-slate-600">📡</button>
+              class="h-8 w-8 rounded-lg border border-slate-300 dark:border-slate-600">&nbsp;📡&nbsp;</button>
       </a>
       <a href="/admin/referrals" title="Referans Yönetimi">
             <button id="referral"
-              class="h-8 w-8 rounded-lg border border-slate-300 dark:border-slate-600">🏛️</button>
+              class="h-8 w-8 rounded-lg border border-slate-300 dark:border-slate-600">&nbsp;🏛️&nbsp;</button>
       </a>
       <button id="themeToggle" title="Tema seçimi (Karanlık/Aydınlık)"
-              class="h-8 w-8 rounded-lg border border-slate-300 dark:border-slate-600">🌓</button>
+              class="h-8 w-8 rounded-lg border border-slate-300 dark:border-slate-600">&nbsp;🌓&nbsp;</button>
     </header>
 
     <!-- Kullanıcı Tablosu -->
@@ -87,7 +86,7 @@
                   data-target="admin"
                   {% if is_admin %}disabled title="Zaten admin"{% endif %}
                   onclick="return confirmRoleChange(this)">
-                  Admin yap
+                  Admin
                 </button>
 
                 <!-- User yap -->
@@ -101,7 +100,7 @@
                      title="{% if is_self %}Kendinizi düşüremezsiniz{% else %}Zaten user{% endif %}"
                   {% endif %}
                   onclick="return confirmRoleChange(this)">
-                  User yap
+                  User
                 </button>
               </td>
             </tr>
@@ -118,7 +117,7 @@
   </main>
 
   <!-- Toggle  -->
-  <script src="{{ url_for('static', path='js/theme_toggle.js') }}?v=1a"></script>
+  <script src="{{ url_for('static', path='js/theme_toggle.js') }}?v=1b"></script>
 
   <script>
     // ---- JS yardımcılar ----

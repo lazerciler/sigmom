@@ -1,0 +1,373 @@
+<!doctype html><!-- app/templates/account.html -->
+<html lang="tr" class="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Sigmom • Hesap Yönetimi (Demo)</title>
+
+  <!-- Theme Boot (opsiyonel) -->
+  <script>/* demo: dark by default */</script>
+  <!-- Tailwind (projendeki tw.css ile değiştir) -->
+  <link rel="stylesheet" href="/static/css/tw.css" />
+  <!-- Proje ekleri (tooltip v3, chip/card/kpi stilleri) -->
+  <link rel="stylesheet" href="/static/css/panel_extras.css" />
+</head>
+
+<body class="bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-100">
+  <!-- Üst bar (panel ile aynı dil) -->
+  <header class="sticky top-0 z-40 backdrop-blur border-b border-slate-200/60 dark:border-slate-800/80 bg-white/70 dark:bg-slate-900/60">
+    <div class="max-w-7xl mx-auto px-4 lg:px-6 h-14 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <span class="h-6 w-6 rounded bg-indigo-600 text-white grid place-items-center text-xs font-semibold">S</span>
+        <span class="text-sm font-medium text-slate-500 dark:text-slate-400">Hesap Yönetimi (Demo)</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <button id="themeToggle" class="h-8 w-8 rounded-lg border border-slate-300 dark:border-slate-600 grid place-items-center" title="Tema değiştir">🌓</button>
+        <a href="#" class="h-9 px-3 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 transition dark:border-slate-600 dark:text-slate-100 dark:hover:bg-slate-800 text-sm font-medium inline-flex items-center">Çıkış</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 lg:px-6 py-6 space-y-6">
+    <!-- Özet + Aksiyonlar -->
+    <section class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <div class="lg:col-span-8">
+        <div class="card shadow-sm p-4">
+          <div class="flex items-center justify-between">
+            <h1 class="text-sm font-semibold">Hesap Özeti</h1>
+            <div class="flex items-center gap-2">
+              <button id="btnDeposit" class="h-9 px-3 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 text-sm">Yatırım Yap</button>
+              <button id="btnWithdraw" class="h-9 px-3 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 transition dark:border-slate-600 dark:text-slate-100 dark:hover:bg-slate-800 text-sm">Çekim İste</button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
+            <div class="kpi"><h6>NAV (Birim Fiyatı)</h6><div id="kpi-nav">—</div></div>
+            <div class="kpi"><h6>Birimlerim (Toplam)</h6><div id="kpi-units">—</div></div>
+            <div class="kpi"><h6>Kilitli / Kullanılabilir</h6><div id="kpi-locked">—</div></div>
+            <div class="kpi"><h6>Güncel Değer (USDT)</h6><div id="kpi-value">—</div></div>
+            <div class="kpi"><h6>Yatırılan Toplam</h6><div id="kpi-invested">—</div></div>
+            <div class="kpi"><h6>Çekilen Toplam</h6><div id="kpi-withdrawn">—</div></div>
+            <div class="kpi"><h6>PnL (₮)</h6><div id="kpi-pnl">—</div></div>
+            <div class="kpi"><h6>PnL (%)</h6><div id="kpi-pnlpct">—</div></div>
+          </div>
+
+          <p class="mt-3 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">Değerler demo amaçlıdır; gerçek işlemleri temsil etmez.</p>
+        </div>
+      </div>
+
+      <aside class="lg:col-span-4 space-y-4">
+        <!-- Ödeme Adresim -->
+        <div class="card shadow-sm p-4">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-semibold">Ödeme Alacağım Cüzdan</h3>
+            <button id="btnAddAddress" class="h-8 px-3 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 transition dark:border-slate-600 dark:text-slate-100 dark:hover:bg-slate-800 text-xs">Yeni Ekle</button>
+          </div>
+          <ul id="addrList" class="mt-3 text-sm divide-y divide-slate-200/60 dark:divide-slate-700/80"></ul>
+          <p class="mt-2 text-[11px] text-slate-500 dark:text-slate-400">Ödemeler <strong>varsayılan</strong> hedefe yapılır. Borsa içi (Binance) transfer tercih edilir; gas ücreti yoktur.</p>
+        </div>
+
+        <!-- Bekleyen Talepler -->
+        <div class="card shadow-sm p-4">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-semibold">Bekleyen Talepler</h3>
+          </div>
+          <ul id="pendingList" class="mt-3 text-sm space-y-2"></ul>
+        </div>
+      </aside>
+    </section>
+
+    <!-- Lotlar + Geçmiş -->
+    <section class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div class="card shadow-sm p-4">
+        <h3 class="text-sm font-semibold mb-3">Lotlarım (Kilit)</h3>
+        <div id="lots" class="text-sm space-y-3"></div>
+      </div>
+      <div class="card shadow-sm p-4">
+        <h3 class="text-sm font-semibold mb-3">Geçmiş</h3>
+        <div id="history" class="text-sm space-y-2"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Yatırım Modal -->
+  <dialog id="dlgDeposit" class="backdrop:bg-black/50 rounded-xl p-0 w-full max-w-md">
+    <form method="dialog" class="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-xl overflow-hidden">
+      <div class="p-4 border-b border-slate-200 dark:border-slate-700 text-sm font-semibold">Yatırım Yap</div>
+      <div class="p-4 space-y-3">
+        <label class="block text-sm">Miktar (USDT)
+          <input id="depAmount" type="number" min="10" step="0.01" placeholder="100.00" class="mt-1 w-full h-10 px-3 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700" required />
+        </label>
+        <p class="text-xs text-slate-500 dark:text-slate-400">Onay sonrası **%3 platform gideri** kesilir ve net tutar üzerinden birim basılır. Kilit: 30 gün.</p>
+      </div>
+      <div class="p-3 bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-2">
+        <button type="button" data-close class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-600">İptal</button>
+        <button id="submitDeposit" class="h-9 px-3 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">Talep Oluştur</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Çekim Modal -->
+  <dialog id="dlgWithdraw" class="backdrop:bg-black/50 rounded-xl p-0 w-full max-w-md">
+    <form method="dialog" class="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-xl overflow-hidden">
+      <div class="p-4 border-b border-slate-200 dark:border-slate-700 text-sm font-semibold">Çekim Talebi</div>
+      <div class="p-4 space-y-3">
+        <div class="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
+          <span>Kullanılabilir: <strong id="wdAvailUnits">—</strong> unit (~<span id="wdAvailUsdt">—</span> USDT)</span>
+        </div>
+        <label class="block text-sm">Tutar (USDT)
+          <input id="wdAmount" type="number" min="10" step="0.01" placeholder="50.00" class="mt-1 w-full h-10 px-3 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700" required />
+        </label>
+        <label class="inline-flex items-center gap-2 text-sm">
+          <input id="chkEarly" type="checkbox" class="rounded" /> Acil durum (erken çıkış, ek %3 kesinti)
+        </label>
+        <div class="text-xs text-slate-500 dark:text-slate-400">Önizleme: ~<span id="wdPreview">—</span> USDT (kesintiler dahil)</div>
+      </div>
+      <div class="p-3 bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-2">
+        <button type="button" data-close class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-600">İptal</button>
+        <button id="submitWithdraw" class="h-9 px-3 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">Talep Oluştur</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Adres Modal -->
+  <dialog id="dlgAddress" class="backdrop:bg-black/50 rounded-xl p-0 w-full max-w-md">
+    <form method="dialog" class="bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 rounded-xl overflow-hidden">
+      <div class="p-4 border-b border-slate-200 dark:border-slate-700 text-sm font-semibold">Ödeme Hedefi Ekle</div>
+      <div class="p-4 space-y-3">
+        <label class="block text-sm">Hedef Türü
+          <select id="addrKind" class="mt-1 w-full h-10 px-3 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700">
+            <option value="internal_binance">Borsa içi (Binance)</option>
+            <option value="onchain">On‑chain</option>
+          </select>
+        </label>
+        <div id="rowInternal">
+          <label class="block text-sm">Binance Kayıtlı E‑posta veya UID
+            <input id="addrIdentifier" type="text" placeholder="you@example.com / 123456789" class="mt-1 w-full h-10 px-3 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700" />
+          </label>
+        </div>
+        <div id="rowOnchain" class="hidden grid grid-cols-1 gap-3">
+          <label class="block text-sm">Ağ
+            <select id="addrNetwork" class="mt-1 w-full h-10 px-3 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700">
+              <option value="ERC20">ERC20</option>
+              <option value="TRC20">TRC20</option>
+              <option value="BEP20">BEP20</option>
+            </select>
+          </label>
+          <label class="block text-sm">Adres
+            <input id="addrAddress" type="text" placeholder="0x... / T..." class="mt-1 w-full h-10 px-3 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700" />
+          </label>
+          <label class="block text-sm">Memo/Tag (opsiyonel)
+            <input id="addrMemo" type="text" class="mt-1 w-full h-10 px-3 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700" />
+          </label>
+        </div>
+        <label class="block text-sm">Etiket (opsiyonel)
+          <input id="addrLabel" type="text" placeholder="Kişisel, Kurumsal..." class="mt-1 w-full h-10 px-3 rounded-lg border border-slate-300 dark:border-slate-600 dark:bg-slate-700" />
+        </label>
+        <label class="inline-flex items-center gap-2 text-sm">
+          <input id="addrDefault" type="checkbox" class="rounded" checked /> Varsayılan yap
+        </label>
+        <p class="text-xs text-slate-500 dark:text-slate-400">Borsa içi transfer önceliklidir; gas ücreti yoktur. Yanlış adres/ağ seçimleri geri alınamaz.</p>
+      </div>
+      <div class="p-3 bg-slate-50 dark:bg-slate-900 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-2">
+        <button type="button" data-close class="h-9 px-3 rounded-lg border border-slate-300 dark:border-slate-600">İptal</button>
+        <button id="submitAddress" class="h-9 px-3 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">Kaydet</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script>
+  // === DEMO VERİLERİ ===
+  const state = {
+    nav: 1.1342,
+    units_total: 6521.38765432,
+    units_locked: 1200.00,
+    invested: 6800.00,
+    withdrawn: 250.00,
+    feeRate: 0.03,
+    penaltyEarly: 0.03,
+    lots: [
+      { id: 1, units_initial: 800, units_left: 800, lock_end: daysFromNow(12) },
+      { id: 2, units_initial: 500, units_left: 400, lock_end: daysFromNow(-2) },
+      { id: 3, units_initial: 200, units_left: 0,   lock_end: daysFromNow(-30) },
+    ],
+    payoutAddresses: [
+      { id: 10, kind: 'internal_binance', identifier: 'user@example.com', label: 'Binance (Ana)', is_default: true },
+      { id: 11, kind: 'onchain', network: 'TRC20', identifier: 'TXYZ...abcd', label: 'TRC20 Cüzdan', is_default: false },
+    ],
+    pending: [
+      { id: 101, type: 'DEPOSIT', amount: 300, state: 'PENDING', requested_at: Date.now()-3600_000 },
+    ],
+    history: [
+      { id: 91, type: 'DEPOSIT', amount: 500, state: 'SETTLED', ts: Date.now()-86400_000*5 },
+      { id: 92, type: 'WITHDRAW', amount: 150, state: 'SETTLED', ts: Date.now()-86400_000*2 },
+    ]
+  };
+  function daysFromNow(d){ return Date.now() + d*86400_000 }
+
+  const fmt = new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 2 });
+  const fmt4 = new Intl.NumberFormat('tr-TR', { maximumFractionDigits: 4 });
+
+  function renderSummary(){
+    const value = state.units_total * state.nav;
+    const pnl = value + state.withdrawn - state.invested;
+    const pnlPct = state.invested ? (pnl / state.invested)*100 : 0;
+    const avail = Math.max(0, state.units_total - state.units_locked);
+
+    document.getElementById('kpi-nav').textContent = fmt4.format(state.nav);
+    document.getElementById('kpi-units').textContent = fmt4.format(state.units_total);
+    document.getElementById('kpi-locked').textContent = `${fmt4.format(state.units_locked)} / ${fmt4.format(avail)}`;
+    document.getElementById('kpi-value').textContent = fmt.format(value);
+    document.getElementById('kpi-invested').textContent = fmt.format(state.invested);
+    document.getElementById('kpi-withdrawn').textContent = fmt.format(state.withdrawn);
+    document.getElementById('kpi-pnl').textContent = `${pnl>=0?'+':''}${fmt.format(pnl)}`;
+    document.getElementById('kpi-pnlpct').textContent = `${pnlPct>=0?'+':''}${fmt4.format(pnlPct)}%`;
+
+    document.getElementById('wdAvailUnits').textContent = fmt4.format(avail);
+    document.getElementById('wdAvailUsdt').textContent = fmt.format(avail*state.nav*(1-state.feeRate));
+  }
+
+  function renderAddresses(){
+    const ul = document.getElementById('addrList'); ul.innerHTML='';
+    state.payoutAddresses.forEach(a=>{
+      const li = document.createElement('li');
+      li.className = 'py-2 flex items-center justify-between';
+      const left = document.createElement('div');
+      left.className = 'flex items-center gap-2';
+      const badge = document.createElement('span');
+      badge.className = 'chip'; badge.textContent = a.kind==='internal_binance' ? 'Binance' : (a.network||'On‑chain');
+      const label = document.createElement('div');
+      label.innerHTML = `<div>${a.label||'-'}</div><div class="text-xs text-slate-500 dark:text-slate-400">${a.identifier}</div>`;
+      left.append(badge,label);
+      const right = document.createElement('div');
+      right.className = 'flex items-center gap-2';
+      if(a.is_default){
+        const d = document.createElement('span'); d.className='chip bg-emerald-50 dark:bg-emerald-900/20 border-emerald-300/50 text-emerald-700 dark:text-emerald-300'; d.textContent='Varsayılan'; right.append(d);
+      } else {
+        const b = btn('Varsayılan Yap', ()=>{ state.payoutAddresses.forEach(x=>x.is_default=false); a.is_default=true; renderAddresses();});
+        right.append(b);
+      }
+      const del = btn('Sil', ()=>{ state.payoutAddresses = state.payoutAddresses.filter(x=>x.id!==a.id); renderAddresses();});
+      right.append(del);
+      li.append(left,right); ul.append(li);
+    });
+  }
+
+  function btn(text, on){ const b=document.createElement('button'); b.className='h-8 px-3 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-100 transition dark:border-slate-600 dark:text-slate-100 dark:hover:bg-slate-800 text-xs'; b.textContent=text; b.onclick=on; return b; }
+
+  function renderPending(){
+    const ul = document.getElementById('pendingList'); ul.innerHTML='';
+    if(!state.pending.length){ ul.innerHTML = '<div class="text-slate-500">Bekleyen talep yok.</div>'; return; }
+    state.pending.forEach(r=>{
+      const li=document.createElement('li');
+      li.className='p-2 rounded-lg border border-slate-200/60 dark:border-slate-700/80 flex items-center justify-between';
+      li.innerHTML = `<div><strong>${r.type}</strong> • ${fmt.format(r.amount)} USDT</div><div class='text-xs text-slate-500'>Beklemede</div>`;
+      ul.append(li);
+    });
+  }
+
+  function renderLots(){
+    const wrap = document.getElementById('lots'); wrap.innerHTML='';
+    if(!state.lots.length){ wrap.innerHTML='<div class="text-slate-500">Lot bulunamadı.</div>'; return; }
+    state.lots.forEach(l=>{
+      const daysLeft = Math.ceil((l.lock_end - Date.now())/86400_000);
+      const pct = Math.round((1-(l.units_left/l.units_initial))*100);
+      const row = document.createElement('div');
+      row.className='p-3 rounded-lg border border-slate-200/60 dark:border-slate-700/80';
+      row.innerHTML = `
+        <div class='flex items-center justify-between'>
+          <div class='text-sm'>${fmt4.format(l.units_left)} / ${fmt4.format(l.units_initial)} unit</div>
+          <div class='text-xs ${daysLeft>0?'text-amber-500':'text-emerald-500'}'>${daysLeft>0?('Kilit: '+daysLeft+'gün'): 'Kilit yok'}</div>
+        </div>
+        <div class='mt-2 h-2 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden'>
+          <div class='h-2 bg-indigo-600' style='width:${pct}%' aria-label='progress'></div>
+        </div>`;
+      wrap.append(row);
+    });
+  }
+
+  function renderHistory(){
+    const box = document.getElementById('history'); box.innerHTML='';
+    state.history.forEach(h=>{
+      const d = new Date(h.ts).toLocaleString('tr-TR');
+      const row = document.createElement('div');
+      row.className='p-2 rounded-lg border border-slate-200/60 dark:border-slate-700/80 flex items-center justify-between';
+      row.innerHTML = `<div><strong>${h.type}</strong> • ${fmt.format(h.amount)} USDT</div><div class='text-xs text-slate-500'>${d}</div>`;
+      box.append(row);
+    });
+  }
+
+  function openDialog(id){ document.getElementById(id).showModal(); }
+  function closeDialogs(){ document.querySelectorAll('dialog').forEach(d=>d.close()); }
+
+  // === Etkileşimler ===
+  document.getElementById('btnDeposit').onclick=()=>openDialog('dlgDeposit');
+  document.getElementById('btnWithdraw').onclick=()=>{ previewWithdraw(); openDialog('dlgWithdraw'); };
+  document.getElementById('btnAddAddress').onclick=()=>openDialog('dlgAddress');
+  document.querySelectorAll('dialog [data-close]').forEach(b=>b.onclick=closeDialogs);
+
+  // Deposit submit (demo)
+  document.getElementById('submitDeposit').onclick=(e)=>{
+    e.preventDefault();
+    const amt = Number(document.getElementById('depAmount').value||0);
+    if(amt<=0) return;
+    state.pending.push({ id:Date.now(), type:'DEPOSIT', amount:amt, state:'PENDING', requested_at:Date.now()});
+    closeDialogs(); renderPending();
+  };
+
+  function previewWithdraw(){
+    const amt = Number(document.getElementById('wdAmount').value||0);
+    const early = document.getElementById('chkEarly').checked;
+    const fees = (1-state.feeRate) * (early ? (1-state.penaltyEarly) : 1);
+    const net = amt * fees;
+    document.getElementById('wdPreview').textContent = fmt.format(net);
+  }
+  document.getElementById('wdAmount').addEventListener('input', previewWithdraw);
+  document.getElementById('chkEarly').addEventListener('change', previewWithdraw);
+
+  document.getElementById('submitWithdraw').onclick=(e)=>{
+    e.preventDefault();
+    const amt = Number(document.getElementById('wdAmount').value||0);
+    if(amt<=0) return;
+    const early = document.getElementById('chkEarly').checked;
+    state.pending.push({ id:Date.now(), type: early?'WITHDRAW_EARLY':'WITHDRAW', amount:amt, state:'PENDING', requested_at:Date.now()});
+    closeDialogs(); renderPending();
+  };
+
+  // Address form toggle
+  const kindSel = document.getElementById('addrKind');
+  const rowInternal = document.getElementById('rowInternal');
+  const rowOnchain = document.getElementById('rowOnchain');
+  kindSel.addEventListener('change',()=>{
+    const on = kindSel.value==='onchain';
+    rowOnchain.classList.toggle('hidden', !on);
+    rowInternal.classList.toggle('hidden', on);
+  });
+
+  document.getElementById('submitAddress').onclick=(e)=>{
+    e.preventDefault();
+    const kind = kindSel.value;
+    const addr = { id:Date.now(), kind, is_default: document.getElementById('addrDefault').checked, label: document.getElementById('addrLabel').value };
+    if(kind==='internal_binance'){
+      addr.identifier = document.getElementById('addrIdentifier').value.trim();
+      if(!addr.identifier) return alert('Binance e‑posta/UID giriniz.');
+    } else {
+      addr.network = document.getElementById('addrNetwork').value;
+      addr.identifier = document.getElementById('addrAddress').value.trim();
+      if(!addr.identifier) return alert('On‑chain adres giriniz.');
+    }
+    if(addr.is_default) state.payoutAddresses.forEach(x=>x.is_default=false);
+    state.payoutAddresses.push(addr);
+    closeDialogs(); renderAddresses();
+  };
+
+  // Tema butonu (demo)
+  document.getElementById('themeToggle').onclick=()=>{
+    document.documentElement.classList.toggle('dark');
+  };
+
+  // İlk render
+  renderSummary(); renderAddresses(); renderPending(); renderLots(); renderHistory();
+  </script>
+</body>
+</html>

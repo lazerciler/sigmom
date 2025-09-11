@@ -21,6 +21,7 @@
 │   ├── __init__.py
 │   ├── config.py
 │   ├── database.py
+│   ├── main-old.py
 │   ├── main.py
 │   ├── models.py
 │   ├── schemas.py
@@ -40,14 +41,15 @@
 │   ├── handlers/
 │   │   ├── __init__.py
 │   │   ├── order_verification_handler.py
+│   │   ├── signal_handler-yontem-1.py
 │   │   └── signal_handler.py
 │   ├── routers/
 │   │   ├── __init__.py
+│   │   ├── account.py
 │   │   ├── admin_referrals.py
 │   │   ├── admin_settings.py
 │   │   ├── admin_test.py
 │   │   ├── auth_google.py
-│   │   ├── auth_logout.py
 │   │   ├── market.py
 │   │   ├── panel.py
 │   │   ├── panel_data.py
@@ -94,6 +96,7 @@
 │   │                   ├── moment.js
 │   │                   └── moment.min.js
 │   ├── templates/
+│   │   ├── account.html
 │   │   ├── admin_referrals.html
 │   │   ├── admin_settings.html
 │   │   ├── admin_test.html
@@ -110,6 +113,7 @@
 ├── crud/
 │   ├── __init__.py
 │   ├── raw_signal.py
+│   ├── trade-old.py
 │   └── trade.py
 ├── migrations/
 │   ├── env.py
@@ -155,4 +159,5 @@
 │   └── zip_logger_backup.py
 └── tests/
     ├── dev_mock_dependencies.py
+    ├── test_trade_close.py
     └── test_trade_helpers.py
