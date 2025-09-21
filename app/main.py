@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # app/main.py
 # Python 3.9
+
 import asyncio
 import logging
 import logging.config
@@ -8,11 +9,15 @@ import os
 import sys
 import time
 
+from app.utils.exchange_validator import validate_all
 from app.config import settings
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.middleware import Middleware
+from starlette.types import ASGIApp
+from typing import List
 
 from app.database import async_session
 from app.routers import webhook_router
@@ -29,6 +34,7 @@ from app.routers import admin_test
 from app.routers import market
 from app.routers import account
 from app.services.referral_maintenance import cleanup_expired_reserved
+from app.services.unrealized_sync import sync_unrealized_for_execution
 
 
 if sys.version_info < (3, 9):
@@ -38,13 +44,14 @@ if sys.version_info < (3, 9):
 logging.basicConfig(level=logging.INFO)
 verifier_logger = logging.getLogger("verifier")
 
-# FastAPI app tanımı
-app = FastAPI(title="SIGMOM Signal Interface", version="1.0.0")
 
-# Session middleware
-app.add_middleware(
-    SessionMiddleware, secret_key=settings.SESSION_SECRET, same_site="lax"
-)
+def _session_middleware_factory(asgi: ASGIApp) -> ASGIApp:
+    return SessionMiddleware(asgi, secret_key=settings.SESSION_SECRET, same_site="lax")
+
+
+middleware = [Middleware(_session_middleware_factory)]
+app = FastAPI(title="SIGMOM Signal Interface", version="1.0.0", middleware=middleware)
+
 
 # Statik ve router mount
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
@@ -62,9 +69,10 @@ app.include_router(account.router)
 
 
 def setup_logging():
-    LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
-    SQLA_ECHO = os.getenv("SQLA_ECHO", "0") == "1"
-    VERIFIER_LEVEL = os.getenv("VERIFIER_LEVEL", "INFO").upper()
+    log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+    sqla_echo = os.getenv("SQLA_ECHO", "0") == "1"
+    verifier_level = os.getenv("VERIFIER_LEVEL", "INFO").upper()
+    # verifier_level = os.getenv("VERIFIER_LEVEL", "WARNING").upper()
 
     logging.config.dictConfig(
         {
@@ -77,12 +85,12 @@ def setup_logging():
                 "console": {"class": "logging.StreamHandler", "formatter": "std"}
             },
             "loggers": {
-                "": {"handlers": ["console"], "level": LOG_LEVEL},
+                "": {"handlers": ["console"], "level": log_level},
                 "httpx": {"level": "WARNING"},
                 "aiomysql": {"level": "WARNING"},
                 "uvicorn.access": {"level": "WARNING"},
-                "sqlalchemy.engine": {"level": "INFO" if SQLA_ECHO else "WARNING"},
-                "verifier": {"level": VERIFIER_LEVEL},
+                "sqlalchemy.engine": {"level": "INFO" if sqla_echo else "WARNING"},
+                "verifier": {"level": verifier_level},
             },
         }
     )
@@ -102,13 +110,40 @@ async def favicon():
     return FileResponse("app/static/favicon.ico")
 
 
+def _verifier_exchanges() -> List[str]:
+    """
+    VERIFY_ONLY_DEFAULT=True ise yalnızca DEFAULT_EXCHANGE üzerinde çalış.
+    Aksi halde ACTIVE_EXCHANGES listesini kullan.
+    """
+    default_ex = (getattr(settings, "DEFAULT_EXCHANGE", "") or "").strip()
+    only_default = bool(getattr(settings, "VERIFY_ONLY_DEFAULT", True))
+    if only_default and default_ex:
+        return [default_ex]
+    # settings.active_exchanges genellikle list[str]; yoksa CSV'yi parse et
+    active_list = getattr(settings, "active_exchanges", None)
+    if isinstance(active_list, (list, tuple)):
+        return list(active_list)
+    active_csv = getattr(settings, "ACTIVE_EXCHANGES", "")
+    if isinstance(active_csv, str) and active_csv.strip():
+        return [x.strip() for x in active_csv.split(",") if x.strip()]
+    # hiçbiri yoksa güvenli düşüş: default varsa onu dön, yoksa boş
+    return [default_ex] if default_ex else []
+
+
 async def verifier_iteration(db, exchange_name: str) -> None:
     try:
         verifier_logger.info(f"→ Checking pending trades for {exchange_name}")
         execution = load_execution_module(exchange_name)
         await verify_pending_trades_for_execution(db, execution)
-        # Ardından kapanışları da izle
         await verify_closed_trades_for_execution(db, execution)
+
+        # Açık pozisyonların unrealized PnL senkronu (borsa → DB)
+        try:
+            n = await sync_unrealized_for_execution(db, exchange_name)
+            verifier_logger.info(f"[uPnL] {exchange_name}: updated={n}")
+        except Exception as exc:
+            verifier_logger.exception(f"[uPnL] {exchange_name}: senkron hatası: {exc}")
+
     except Exception as e:
         verifier_logger.error(f"Verifier error for {exchange_name}: {e}", exc_info=True)
 
@@ -125,7 +160,7 @@ async def verifier_loop(poll_interval: int = 5, cleanup_interval_sec: int = 10 *
 
             # 1) Trade doğrulama — kendi session'unda
             async with async_session() as db:
-                for exchange_name in settings.active_exchanges:
+                for exchange_name in _verifier_exchanges():
                     await verifier_iteration(db, exchange_name)
 
             # 2) Referral expiry cleanup — AYRI session
@@ -137,10 +172,10 @@ async def verifier_loop(poll_interval: int = 5, cleanup_interval_sec: int = 10 *
                             n = await cleanup_expired_reserved(s)
                     if n:
                         verifier_logger.info(
-                            "Referral expiry cleanup: %s satır temizlendi", n
+                            "Referral expiry cleanup: %s rows cleared", n
                         )
                 except Exception as exc:
-                    verifier_logger.exception("Referral expiry cleanup hata: %s", exc)
+                    verifier_logger.exception("Referral expiry cleanup error: %s", exc)
                 last_cleanup_ts = now_ts
 
             await asyncio.sleep(poll_interval)
@@ -155,17 +190,36 @@ async def verifier_loop(poll_interval: int = 5, cleanup_interval_sec: int = 10 *
 
 @app.on_event("startup")
 async def startup_event():
-    # asyncio.create_task(
-    #     verifier_loop(poll_interval=settings.VERIFY_INTERVAL_SECONDS)
-    # )
-    app.state.verifier_task = asyncio.create_task(
+    app.state.verifier_task = asyncio.create_task(  # type: ignore[attr-defined]
         verifier_loop(poll_interval=settings.VERIFY_INTERVAL_SECONDS)
     )
+    try:
+        verifier_logger.info(
+            "Verifier exchanges (effective): %s",
+            ", ".join(_verifier_exchanges()) or "∅",
+        )
+    except Exception:
+        pass
+
+    active_csv = getattr(settings, "ACTIVE_EXCHANGES", "")
+    active = [x.strip() for x in active_csv.split(",") if x.strip()]
+    issues = validate_all(active)
+    if issues:
+        msgs = []
+        for ex, errs in issues:
+            msgs.append(f"\n- {ex}:\n  - " + "\n  - ".join(errs))
+        # Tercihinize göre: raise veya sadece log
+        # raise RuntimeError("Exchange contract violations:" + "".join(msgs))
+        import logging
+
+        logging.getLogger("contract").error(
+            "Exchange contract violations:%s", "".join(msgs)
+        )
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    task = getattr(app.state, "verifier_task", None)
+    task = getattr(app.state, "verifier_task", None)  # type: ignore[attr-defined]
     if task:
         task.cancel()
         try:

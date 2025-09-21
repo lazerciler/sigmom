@@ -1,3 +1,5 @@
+# Python 3.9
+# tests/test_trade_close.py
 import sys
 import types
 import asyncio
@@ -125,6 +127,78 @@ class FakeSession:
 
 
 # ---------------------------------------------------------------------------
+# verify_close_after_signal commit test
+# ---------------------------------------------------------------------------
+
+
+# import pytest
+
+
+@pytest.mark.asyncio
+async def test_verify_close_after_signal_commits(monkeypatch):
+    trade = StrategyOpenTrade(
+        id=1,
+        public_id="abc",
+        status="open",
+        symbol="BTCUSDT",
+    )
+    session = FakeSession(trade)
+
+    # Patch select().scalar_one() to simulate "already closed trade exists"
+    class DummyResult:
+        def scalar_one(self):
+            return 1
+
+    async def fake_execute(*a, **k):
+        return DummyResult()
+
+    session.execute = fake_execute
+
+    import crud.trade as trade_mod
+
+    # DB'den open trade seçimi bu testin konusu değil: doğrudan trade döndür.
+    async def fake_get_open_trade_for_close(
+        db, public_id, symbol, exchange, fund_manager_id=None, side=None
+    ):
+        return trade
+
+    monkeypatch.setattr(
+        trade_mod, "get_open_trade_for_close", fake_get_open_trade_for_close
+    )
+
+    # .where(StrategyTrade.open_trade_public_id == ...) ifadesi için sütunu stub'la
+    class _DummyCol:
+        def __eq__(self, other):
+            return self
+
+    setattr(trade_mod.StrategyTrade, "open_trade_public_id", _DummyCol())
+
+    # verify_close_after_signal içinde kullanılan select(func.count()).select_from(...)
+    # zincirini kırmamak için no-op bir DummySelect verelim.
+    class DummySelect:
+        def where(self, *a, **k):
+            return self
+
+        def select_from(self, *a, **k):
+            return self
+
+    monkeypatch.setattr(trade_mod, "select", lambda *a, **k: DummySelect())
+
+    result = await trade_mod.verify_close_after_signal(
+        session,
+        trade,
+        public_id=trade.public_id,
+        symbol=trade.symbol,
+        exchange="binance",
+    )
+
+    assert result is True
+    assert trade.status == "closed"
+    session.flush.assert_awaited()
+    session.commit.assert_awaited()
+
+
+# ---------------------------------------------------------------------------
 # close_open_trade_and_record tests
 # ---------------------------------------------------------------------------
 
@@ -149,10 +223,11 @@ async def test_close_open_trade_success(patch_trade_sql, caplog):
     session = FakeSession(trade)
     position_data = {"avgClosePrice": "110"}
     caplog.set_level(logging.INFO, logger="verifier")
-    await trade_module.close_open_trade_and_record(session, trade, position_data)
+    ok = await trade_module.close_open_trade_and_record(session, trade, position_data)
     session.add.assert_called_once()
     session.commit.assert_awaited_once()
     session.rollback.assert_not_called()
+    assert ok is True
     assert "[closed-recorded]" in caplog.text
 
 
@@ -176,10 +251,11 @@ async def test_close_open_trade_error_rolls_back(patch_trade_sql, caplog):
     session = FakeSession(trade)
     position_data = {"avgClosePrice": "110"}
     caplog.set_level(logging.ERROR, logger="verifier")
-    await trade_module.close_open_trade_and_record(session, trade, position_data)
+    ok = await trade_module.close_open_trade_and_record(session, trade, position_data)
     session.rollback.assert_awaited_once()
     session.commit.assert_not_called()
     assert trade.status == "open"
+    assert ok is False
     assert "[close-fail]" in caplog.text
 
 

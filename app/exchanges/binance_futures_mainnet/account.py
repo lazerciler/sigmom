@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# app/exchanges/binance_futures_testnet/account.py
+# app/exchanges/binance_futures_mainnet/account.py
 # Python 3.9
 
 import asyncio
@@ -210,7 +210,7 @@ async def income_summary(
     Binance USDⓈ-M Futures gelir dökümünden (REALIZED_PNL) net toplamı döndürür.
     - symbol: 'BTCUSDT' gibi (opsiyonel)
     - since/until: datetime(UTC); sayfalama ile /fapi/v1/income taranır.
-    Not: Testnet'te de bu uç desteklenir; limit=1000 sayfalanır.
+    Not: mainnet'te de bu uç desteklenir; limit=1000 sayfalanır.
     """
     ep = ENDPOINTS.get("INCOME", "/fapi/v1/income")
     url = BASE_URL + ep

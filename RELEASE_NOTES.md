@@ -1,6 +1,29 @@
 # SIGMOM — Release Notes
 
-## v1.0.1 — 2025-08-23
+## v1.1.0 — 2025-09-21
+
+### Özellikler
+- **Otomatik kapanış senkronu (VWAP fallback):**
+  - Uygulama kapalıyken borsada (SL/TP/manuel) kapanan pozisyonlar, açılışta **/fapi/v1/userTrades** üzerinden kapanışı yapan fill’ler toplanarak **VWAP** ile otomatik kapatılır.
+  - Fiyat, borsanın **PRICE_FILTER.tickSize** değerine göre quantize edilir; PnL borsa ile uyumlu hale gelir.
+
+### Değişiklikler
+- **Testnet → Mainnet paritesi:** `binance_futures_testnet` tarafındaki akış (helper + quantize + endpoints) `binance_futures_mainnet` modülüne taşındı.
+- **Timestamp normalizasyonu:** `get_close_price_from_usertrades` artık `str/datetime/epoch (s|ms)` girişlerini kabul edip ms’e dönüştürüyor; `startTime` için küçük bir geri-bakış tamponu uygulanıyor.
+- **Ayarlaştırma:** `USERTRADES_LOOKBACK_MS` (varsayılan 120000 ms) ile `userTrades` başlangıç zaman penceresi yönetilebilir hale getirildi.
+- **Quantize iyileştirmeleri:** `utils` içinde **PRICE_FILTER.tickSize** cache’leniyor; `quantize_price()` güvenli okuma yapıyor.
+- **Merkez entegrasyon:** `crud/trade.py` kapanış fiyatı bulunamadığında veya `positionAmt == 0` olduğunda borsaya özel modüldeki `get_close_price_from_usertrades` helper’ını **dinamik** çağırır (modüler yapı korunur).
+- **Kozmetik:** `utils.get_symbol_meta_map` / `quantize_price` docstring’leri, dönen `tick` alanını da yansıtacak şekilde güncellendi.
+
+### Kapsam Dışı (tasarım kararı)
+- **Merkez dışında (borsa UI’dan) manuel açılan pozisyonlar** sistem kapsamına alınmaz; import/senkron yapılmaz ve uyarı gösterilmez. (Gerekirse yalnızca geliştirici log seviyesinde takip edilebilir.)
+
+### Notlar
+- `ENDPOINTS["USER_TRADES"] = "/fapi/v1/userTrades"` hem testnet hem mainnette tanımlı olmalı.
+- `settings.py`’de `USERTRADES_LOOKBACK_MS` isteğe göre 120–300 sn aralığında ayarlanabilir (daha büyük değer = daha çok satır / potansiyel rate limit baskısı).
+
+
+## v1.0.1 / v1.03 — 2025-08-23 / 2025-08-28
 
 ### 🎯 Öne Çıkanlar
 - **Görünürlük Kuralları (Panel)**

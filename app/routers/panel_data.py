@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 # app/routers/panel_data.py
 # Python 3.9
-from decimal import Decimal
+
+from decimal import Decimal, InvalidOperation
+import asyncio
+import httpx
 from typing import Dict, Any, Tuple, List, Optional, Literal, Sequence
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, Query, HTTPException
@@ -22,7 +25,7 @@ router = APIRouter(prefix="/api/me", tags=["me"])
 def _to_dec(x: Any) -> Decimal:
     try:
         return Decimal(str(x))
-    except Exception:
+    except (InvalidOperation, ValueError, TypeError):
         return Decimal("0")
 
 
@@ -62,6 +65,7 @@ class OpenTradeOut(BaseModel):
     side: Literal["long", "short"]
     entry_price: float
     position_size: float
+    position_size_text: Optional[str] = None
     leverage: int
     exchange: str
     order_type: str
@@ -239,7 +243,6 @@ async def markers_public(
                 time_bar=tbc,
             )
         )
-
     # sırala ve dön
     markers.sort(key=lambda m: (m.time, 0 if m.kind == "open" else 1, m.symbol, m.id))
     return markers
@@ -250,31 +253,60 @@ async def open_trades_public(
     symbol: Optional[str] = Query(None, min_length=1, max_length=64),
     db: AsyncSession = Depends(get_db),
 ):
+    import importlib
+
     q = (
         select(StrategyOpenTrade)
         .where(func.lower(StrategyOpenTrade.status) == "open")
         .order_by(StrategyOpenTrade.timestamp.desc())
     )
     if symbol:
-        q = q.where(StrategyOpenTrade.symbol == symbol)
-
+        sym = symbol.strip().upper()
+        q = q.where(func.upper(StrategyOpenTrade.symbol) == sym)
     rows = (await db.execute(q)).scalars().all()
-    return [
-        OpenTradeOut(
-            public_id=r.public_id,
-            symbol=r.symbol,
-            side=str(r.side).lower(),
-            entry_price=_f(r.entry_price),
-            position_size=_f(r.position_size),
-            leverage=int(r.leverage),
-            exchange=r.exchange,
-            order_type=r.order_type,
-            timestamp=r.timestamp,
-            exchange_order_id=getattr(r, "exchange_order_id", None),
-            status=str(r.status),
+    out: List[OpenTradeOut] = []
+    for r in rows:
+        pos_text: Optional[str] = None
+        try:
+            ex = (r.exchange or settings.DEFAULT_EXCHANGE).strip()
+            utils = importlib.import_module(f"app.exchanges.{ex}.utils")
+            # Tercih sırası: format_quantity_text (gösterim) → adjust_quantity (legacy)
+            fn = getattr(utils, "format_quantity_text", None) or getattr(
+                utils, "adjust_quantity", None
+            )
+            if fn:
+                pos_text = (
+                    await fn(r.symbol, float(r.position_size))
+                    if inspect.iscoroutinefunction(fn)
+                    else fn(r.symbol, float(r.position_size))
+                )
+        except (
+            ImportError,
+            AttributeError,
+            ValueError,
+            TypeError,
+            httpx.HTTPError,
+            asyncio.TimeoutError,
+        ):
+            pos_text = None
+
+        out.append(
+            OpenTradeOut(
+                public_id=r.public_id,
+                symbol=r.symbol,
+                side=str(r.side).lower(),
+                entry_price=_f(r.entry_price),
+                position_size=_f(r.position_size),
+                position_size_text=pos_text,
+                leverage=int(r.leverage),
+                exchange=r.exchange,
+                order_type=r.order_type,
+                timestamp=r.timestamp,
+                exchange_order_id=getattr(r, "exchange_order_id", None),
+                status=str(r.status),
+            )
         )
-        for r in rows
-    ]
+    return out
 
 
 @router.get("/recent-trades", response_model=List[TradeOut])
@@ -434,8 +466,11 @@ async def me_balance(
             )
         # Sync implementasyon varsa:
         return fn(asset=asset, symbol=symbol, currency=currency, return_all=return_all)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    # except Exception as e:
+    #     raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        # UI akmaya devam etsin: güvenli sıfırlar döndür.
+        return {"available": 0.0, "equity": 0.0}
 
 
 def _normalize_upnl(raw: Any) -> Tuple[Decimal, Decimal, Decimal]:
@@ -540,11 +575,6 @@ def _normalize_upnl(raw: Any) -> Tuple[Decimal, Decimal, Decimal]:
             if not isinstance(it, dict):
                 total += _to_dec(it)
                 continue
-            # side = str(it.get("side", "")).lower()
-            # v = (it.get("unrealizedPnl") or it.get("u_pnl")
-            #      or it.get("unrealized") or it.get("pnl") or 0)
-
-            # Side: Binance vb. 'positionSide'/'posSide' da kullanabilir
             side = str(
                 it.get("side")
                 or it.get("positionSide")
@@ -569,6 +599,10 @@ def _normalize_upnl(raw: Any) -> Tuple[Decimal, Decimal, Decimal]:
                 long_amt += dv
             elif side.startswith("short"):
                 short_amt += dv
+        # return total, long_amt, short_amt
+        # one_way/BOTH: yön ayrımı yoksa toplamı LONG kabul et
+        if long_amt == 0 and short_amt == 0 and total != 0:
+            long_amt = total
         return total, long_amt, short_amt
 
     # tanınmayan şekil → sadece toplamı almaya çalış
@@ -609,15 +643,19 @@ async def me_unrealized(
             return raw
 
         total, long_amt, short_amt = _normalize_upnl(raw)
-
         # moddan pozisyon modu (varsa) oku; yoksa varsayılan
         try:
             ex = load_execution_module(exchange)
             mode = getattr(
                 getattr(ex, "order_handler", None), "POSITION_MODE", "one_way"
             )
-        except Exception:
+        # except Exception:
+        except (ImportError, AttributeError):
             mode = "one_way" if (short_amt == 0) else "hedge"  # kaba tahmin
+
+        # one_way/BOTH: legs 0 ise toplamı LONG’a yaz
+        if str(mode) == "one_way" and long_amt == 0 and short_amt == 0 and total != 0:
+            long_amt = total
 
         return {
             "unrealized": float(total),
@@ -653,7 +691,9 @@ async def me_netpnl(
     now = datetime.now(timezone.utc)
 
     # 1) Zaman penceresi: parametre varsa öncelik ver
-    since_dt: Optional[datetime] = None
+    # since_dt: Optional[datetime] = None
+    # if since_epoch is not None:
+    # since_dt başlangıç atamasını kaldır (F841 susturulur)
     if since_epoch is not None:
         since_dt = datetime.fromtimestamp(int(since_epoch), tz=timezone.utc)
     elif since_days is not None:
@@ -684,38 +724,13 @@ async def me_netpnl(
             "source": "exchange-income",
         }
 
-    # 3) Borsa onaylı gelirleri topla (income_summary)
-    # 3) Borsa onaylı gelirleri topla (income_summary / income_breakdown)
-    # try:
-    #     mod = importlib.import_module(f"app.exchanges.{ex}.account")
-    #     fn = getattr(mod, "income_summary", None)
-    #     if not callable(fn):
-    #         raise RuntimeError(f"{ex}.account içinde income_summary(...) yok")
-    #
-    #     if inspect.iscoroutinefunction(fn):
-    #         total = await fn(symbol=sym, since=since_dt, until=None)
-    #     else:
-    #         total = fn(symbol=sym, since=since_dt, until=None)
-    #
-    #     total = float(total or 0)
-    #     return {
-    #         "net": total,
-    #         "window": {"since": since_dt.isoformat(), "until": now.isoformat()},
-    #         "exchange": ex,
-    #         "symbol": sym,
-    #         "source": "exchange-income",
-    #     }
-    # except Exception as e:
-    #     raise HTTPException(status_code=400, detail=str(e))
-
-    # 3) Borsa onaylı gelirleri topla (önce account, sonra order_handler fallback)
     try:
 
         def _norm_keys(d: dict) -> dict:
-            out = {}
+            normed = {}
             for k, v in (d or {}).items():
                 kk = str(k).lower().strip()
-                # Binance incomeType normalizasyonu
+                # incomeType normalizasyonu (kanonik anahtarlar: commission, funding, realized)
                 if kk in (
                     "commission",
                     "fees",
@@ -734,10 +749,10 @@ async def me_netpnl(
                 else:
                     key = kk
                 try:
-                    out[key] = float(v or 0.0)
-                except Exception:
-                    out[key] = 0.0
-            return out
+                    normed[key] = float(v or 0.0)
+                except (ValueError, TypeError):
+                    normed[key] = 0.0
+            return normed
 
         total_val: float = 0.0
         breakdown: Optional[dict] = None
@@ -785,11 +800,14 @@ async def me_netpnl(
                     breakdown = res[1]
                 else:
                     # sadece toplam (float) dönmüş olabilir
+                    # try:
+                    #     total_val = float(res or 0.0)
+                    # except Exception:
+                    #     total_val = 0.0
                     try:
                         total_val = float(res or 0.0)
-                    except Exception:
+                    except (ValueError, TypeError):
                         total_val = 0.0
-
         # 3b) order_handler.income_summary (start_ms/end_ms) → sum ile breakdown veriyor
         if detail and breakdown is None:
             try:

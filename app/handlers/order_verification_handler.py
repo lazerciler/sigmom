@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # app/handlers/order_verification_handler.py
 # python 3.9
+
 import logging
 from decimal import Decimal
 from sqlalchemy import select, func
@@ -23,21 +24,24 @@ async def verify_closed_trades_for_execution(db: AsyncSession, execution):
     open_trades = res.scalars().all()
 
     for trade in open_trades:
+        # Commit/flush sonrası ORM alanlarına dokunmamak için skalarları baştan al
+        pid = trade.public_id
+        sym = trade.symbol
         try:
             # Hedge ise doğru bacağı sor
             try:
                 pm = getattr(execution.order_handler, "POSITION_MODE", "one_way")
-            except Exception:
+            except AttributeError:
                 pm = "one_way"
             if pm == "hedge":
-                pos = await execution.order_handler.get_position(
-                    trade.symbol, side=trade.side
-                )
+                pos = await execution.order_handler.get_position(sym, side=trade.side)
             else:
-                pos = await execution.order_handler.get_position(trade.symbol)
+                pos = await execution.order_handler.get_position(sym)
 
-        except Exception as e:
-            logger.warning(f"[closed-verify/get_position] {trade.symbol} hata: {e}")
+        except (
+            Exception
+        ) as e:  # exchange katmanından gelen çok çeşitli hataları tek noktada ele alıyoruz
+            logger.warning(f"[closed-verify/get_position] {sym} hata: {e}")
             continue
 
         amt = Decimal(str((pos or {}).get("positionAmt", "0"))).copy_abs()
@@ -46,21 +50,23 @@ async def verify_closed_trades_for_execution(db: AsyncSession, execution):
             exists_q = await db.execute(
                 select(func.count())
                 .select_from(StrategyTrade)
-                .where(StrategyTrade.open_trade_public_id == trade.public_id)
+                .where(StrategyTrade.open_trade_public_id == pid)
             )
             if (exists_q.scalar_one() or 0) > 0:
-                # Kayıt zaten var → sadece statüyü kapatıp geç (ikinci trade yazma)
+                # Kayıt zaten var → sadece statüyü kapat ve KALICI yap
                 if (trade.status or "").lower() != "closed":
                     trade.status = "closed"
                     await db.flush()
-                logger.info(
-                    "[verify] skip: already recorded close for %s", trade.public_id
-                )
+                    await db.commit()
+                logger.info("[verify] skip: already recorded close for %s", pid)
                 continue
             logger.info(
-                f"[closed-verify] {trade.symbol} → There is no position in the stock market; closing is recorded."
+                f"[closed-verify] {sym} → There is no position in the stock market; closing is recorded."
             )
-            await close_open_trade_and_record(db, trade, pos)
-            # await db.commit()
+            ok = await close_open_trade_and_record(db, trade, pos)
+            if not ok:
+                logger.error("[closed-verify] failed to record close for %s", pid)
+            if ok:
+                await db.commit()  # ← kayıt + status değişiklikleri kalıcı
         else:
-            logger.debug(f"[closed-verify] {trade.symbol} → still open (amt={amt}).")
+            logger.debug(f"[closed-verify] {sym} → still open (amt={amt}).")

@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-# app/exchanges/binance_futures_testnet/settings.py
+# app/exchanges/binance_futures_mainnet/settings.py
 # Python 3.9
 from app.config import settings
 
-EXCHANGE_NAME = "binance_futures_testnet"
+EXCHANGE_NAME = "binance_futures_mainnet"
 
 API_KEY = getattr(settings, f"{EXCHANGE_NAME.upper()}_API_KEY")
 API_SECRET = getattr(settings, f"{EXCHANGE_NAME.upper()}_API_SECRET")
-BASE_URL = "https://testnet.binancefuture.com"
+BASE_URL = "https://fapi.binance.com"
 
 POSITION_MODE = "one_way"  # "one_way" or "hedge"
 
 # userTrades aralığı için geriye bakış (ms)
-USERTRADES_LOOKBACK_MS = 120_000  # 60_000 kısa kalabilir bu yüzden 120 önerilir.
+USERTRADES_LOOKBACK_MS = 120_000  # 60_000 kısa kalabilir bu yüzden 120_000 önerilir.
 # Kısa açıklama: startTime tamponu, /fapi/v1/userTrades sorgusunda başlangıç zamanını açılış timestamp’ından
 # bir miktar geriye çekmemiz.
 # Neden? Exchange ile bizim kayıt saatimiz arasında küçük kaymalar olabilir

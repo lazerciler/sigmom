@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     # Doğrulama döngü intervali (saniye)
     VERIFY_INTERVAL_SECONDS: int = Field(5, env="VERIFY_INTERVAL_SECONDS")
 
+    # Verifier yalnızca DEFAULT_EXCHANGE üzerinde çalışsın mı?
+    VERIFY_ONLY_DEFAULT: bool = Field(True, env="VERIFY_ONLY_DEFAULT")
+
     # Binance Futures Testnet
     BINANCE_FUTURES_TESTNET_API_KEY: str = Field(
         default="", env="BINANCE_FUTURES_TESTNET_API_KEY"

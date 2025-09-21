@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 # app/handlers/signal_handler.py
 # Python 3.9
+
 import logging
 import asyncio
-from decimal import Decimal
+import httpx
+from decimal import Decimal, InvalidOperation
 from typing import Optional, Dict, Set, Tuple
-
+from sqlalchemy.exc import SQLAlchemyError
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
@@ -52,8 +54,15 @@ async def _bg_verify_close(execution, public_id, symbol, exchange):
                 max_retries=5,
                 interval_seconds=0.5,
             )
-    except Exception:
-        logger.exception("[bg] verify_close_after_signal crashed")
+    except (
+        SQLAlchemyError,
+        httpx.RequestError,  # network/timeout dâhil
+        asyncio.TimeoutError,
+        AttributeError,
+        ValueError,
+        TypeError,
+    ) as e:
+        logger.exception("[bg] verify_close_after_signal crashed: %s", e)
     finally:
         RUNNING_CLOSE_CHECKS.discard(key)
 
@@ -71,7 +80,7 @@ async def _force_sync_qty(
     try:
         ex_amt = Decimal(str(pos.get("positionAmt", "0"))).copy_abs()
         ex_price = Decimal(str(pos.get("entryPrice", "0")))
-    except Exception as e:
+    except (InvalidOperation, ValueError, TypeError) as e:
         logger.warning("[SYNC] parse error: %s", e)
         return
     res = await db.execute(
@@ -83,14 +92,14 @@ async def _force_sync_qty(
     updates = {}
     try:
         db_amt = Decimal(str(row.position_size))
-    except Exception:
+    except (InvalidOperation, ValueError, TypeError):
         db_amt = None
     if db_amt is None or db_amt != ex_amt:
         updates["position_size"] = ex_amt
     # entry_price zaten doğruysa dokunma; değilse eşitle
     try:
         db_price = Decimal(str(row.entry_price))
-    except Exception:
+    except (InvalidOperation, ValueError, TypeError):
         db_price = None
     if db_price is None or db_price != ex_price:
         updates["entry_price"] = ex_price
@@ -130,7 +139,7 @@ async def _get_position_for_side(
             except TypeError:
                 return await execution.order_handler.get_position(symbol)
         return await execution.order_handler.get_position(symbol)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001  (farklı borsalarda farklı hatalar gelebilir)
         logger.debug("[get_position] exception: %s", e)
         return None
 
@@ -157,7 +166,7 @@ async def _poll_position_change(
         try:
             if _amt(last) != ref_amt:
                 break
-        except Exception:
+        except (InvalidOperation, ValueError, TypeError):
             pass
         await asyncio.sleep(delay)
     return last
@@ -179,7 +188,7 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
     # Borsa modülünü yükle
     try:
         execution = load_execution_module(signal_data.exchange)
-    except Exception as e:
+    except (ModuleNotFoundError, ImportError, AttributeError) as e:
         logger.exception("Exchange module failed to load")
         await db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
@@ -239,7 +248,7 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
                     amt_now = Decimal(
                         str((pos_now or {}).get("positionAmt", "0"))
                     ).copy_abs()
-                except Exception:
+                except (InvalidOperation, ValueError, TypeError):
                     amt_now = Decimal("0")
 
                 # order_handler.settings içindeki mod
@@ -294,28 +303,40 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
                             amt_after = Decimal(
                                 str((pos_after or {}).get("positionAmt", "0"))
                             ).copy_abs()
-                        except Exception:
+                        except (InvalidOperation, ValueError, TypeError):
                             amt_after = Decimal("0")
 
+                        # amt_after'ı gerçekten kullan → try/except ELSE yapısından çıkar.
                         if amt_after == Decimal("0"):
-                            # Tamamen kapandı → trade kaydını kapat ve StrategyTrade’e yaz
-                            await close_open_trade_and_record(db, open_trade, pos_after)
-                            await db.commit()
+                            pid = open_trade.public_id
+                            ok = await close_open_trade_and_record(
+                                db, open_trade, pos_after
+                            )
+                            if not ok:
+                                return {
+                                    "success": False,
+                                    "message": "Failed to record closed trade after counter signal.",
+                                    "public_id": pid,
+                                }
                             return {
                                 "success": True,
                                 "message": "Counter signal (one_way): position fully closed and recorded.",
-                                "public_id": open_trade.public_id,
+                                "public_id": pid,
                             }
                         else:
+
                             # Kısmi kapandı → open trade'i borsa verisiyle güncelle,
                             # sonra emniyet kemeriyle zorla eşitle
                             await confirm_open_trade(db, open_trade, pos_after)
                             await _force_sync_qty(db, open_trade.id, pos_after)
+                            pid = open_trade.public_id
                             await db.commit()
+
                             return {
                                 "success": True,
                                 "message": "Counter signal (one_way): position reduced and synced with exchange.",
-                                "public_id": open_trade.public_id,
+                                # "public_id": open_trade.public_id,
+                                "public_id": pid,
                             }
 
             # === NORMAL OPEN (aynı yönde artırma dâhil) ===
@@ -368,14 +389,19 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
             await confirm_open_trade(db, open_trade, pos_after_open)
             # Bazı borsalarda/latency durumlarında qty güncellenmeyebiliyor → emniyet kemeri
             await _force_sync_qty(db, open_trade.id, pos_after_open)
+            # await db.commit()
+            pid = open_trade.public_id
             await db.commit()
             return {
                 "success": True,
                 "message": "The position was opened/increased and synced with the exchange.",
-                "public_id": open_trade.public_id,
+                # "public_id": open_trade.public_id,
+                "public_id": pid,
             }
 
-        except Exception as e:
+        except (
+            Exception
+        ) as e:  # noqa: BLE001  (OPEN akışında bütün hataları toplayıp döndürüyoruz)
             logger.exception("OPEN operation failed: %s", e)
             await db.rollback()
             return {"success": False, "message": f"OPEN error: {e}"}
@@ -400,7 +426,7 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
         # Hedge: sinyalde side geldiyse yanlış bacak seçildiyse düzelt / ya da hiç bulunamadıysa side ile seç
         try:
             position_mode = getattr(execution.order_handler, "POSITION_MODE", "one_way")
-        except Exception:
+        except AttributeError:
             position_mode = "one_way"
 
         desired_side = _canon_side(getattr(signal_data, "side", None))
@@ -451,22 +477,32 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
 
         if pos_after and _amt(pos_after) == Decimal("0"):
             # Tam kapanış: kalıcı trade’e taşı
-            await close_open_trade_and_record(db, open_trade, pos_after)
-            await db.commit()
+            # ok = await close_open_trade_and_record(db, open_trade, pos_after)
+            pid = open_trade.public_id
+            ok = await close_open_trade_and_record(db, open_trade, pos_after)
+            if ok:
+                return {
+                    "success": True,
+                    "message": "Position closed and recorded.",
+                    # "public_id": open_trade.public_id,
+                    "public_id": pid,
+                }
             return {
-                "success": True,
-                "message": "Position closed and recorded.",
-                "public_id": open_trade.public_id,
+                "success": False,
+                "message": "Failed to record closed trade.",
+                # "public_id": open_trade.public_id,
+                "public_id": pid,
             }
         else:
             # Kısmi kapanış: açık trade'i borsa verisiyle hemen güncelle + emniyet kemeri
             await confirm_open_trade(db, open_trade, pos_after)
             await _force_sync_qty(db, open_trade.id, pos_after)
+            pid = open_trade.public_id  # commit'ten ÖNCE oku
             await db.commit()
             asyncio.create_task(
                 _bg_verify_close(
                     execution,
-                    open_trade.public_id,
+                    pid,
                     signal_data.symbol,
                     signal_data.exchange,
                 )
@@ -474,5 +510,6 @@ async def handle_signal(signal_data: WebhookSignal, db: AsyncSession) -> dict:
             return {
                 "success": True,
                 "message": "Position reduced and synced; background close check started.",
-                "public_id": open_trade.public_id,
+                # "public_id": open_trade.public_id,
+                "public_id": pid,
             }

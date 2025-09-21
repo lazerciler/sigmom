@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# app/exchanges/binance_futures_testnet/sync.py
+# app/exchanges/binance_futures_mainnet/sync.py
 # Python 3.9
 
 import logging
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 async def get_open_position(symbol: str) -> dict:
     """
-    Binance Futures testnet üzerinde verilen sembol için açık pozisyonu getirir.
+    Binance Futures mainnet üzerinde verilen sembol için açık pozisyonu getirir.
     """
     try:
         endpoint = ENDPOINTS["POSITION_RISK"]

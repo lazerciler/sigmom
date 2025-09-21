@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# app/exchanges/binance_futures_testnet/utils.py
+# app/exchanges/binance_futures_mainnet/utils.py
 # Python 3.9
 
 import logging
@@ -101,7 +101,7 @@ async def set_position_mode(mode: str) -> dict:
 
 
 async def set_leverage(symbol: str, leverage: int) -> dict:
-    """Binance Futures testnet üzerinde sembol için kaldıracı ayarlar."""
+    """Binance Futures Mainnet üzerinde sembol için kaldıracı ayarlar."""
     sym = (symbol or "").upper()
     try:
         lev = max(1, min(125, int(leverage)))

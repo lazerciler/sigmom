@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# app/exchanges/binance_futures_testnet/positions.py
+# app/exchanges/binance_futures_mainnet/positions.py
 
 import httpx
 from .settings import BASE_URL, ENDPOINTS

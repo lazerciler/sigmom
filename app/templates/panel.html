@@ -70,7 +70,11 @@
       <div class="lg:col-span-8">
         <div class="card shadow-sm">
           <div class="flex items-center justify-between p-4 border-b border-slate-200 dark:border-slate-700">
-            <div id="symbol-label" class="text-sm font-semibold">—</div>
+<!--            <div id="symbol-label" class="text-sm font-semibold">—</div> -->
+
+            <!-- sembol seçici -->
+            <select id="symbolPicker" data-symbol-picker class="select select-sm w-36 dark:bg-slate-800 dark:text-slate-100"></select>
+
             <div class="flex items-center gap-2">
               <!-- TF butonları -->
               <div id="tf-controls" class="hidden sm:inline-flex gap-1 text-xs">
@@ -81,13 +85,18 @@
                 <button class="chip" data-tf="4h">4h</button>
                 <button class="chip" data-tf="1d">1d</button>
               </div>
-              <span id="feed-status" class="chip bg-slate-100 dark:bg-slate-800/60"><div class="loader"></div></span>
+              <span id="feed-status" class="chip bg-slate-100 dark:bg-slate-800/60">
+                <div class="loader"></div>
+              </span>
             </div>
           </div>
           <div id="chart" class="h-[380px] sm:h-[440px] min-h-[260px]"></div>
           <div id="data-disclaimer" class="px-4 py-2 text-[11px] text-slate-500 dark:text-slate-400 border-t border-slate-200 dark:border-slate-700">
-          {{ 'Veriler gecikmelidir; **bu bir hata değil, gürültü filtreleme ve grafik stabilizasyonu içindir.**' if referral_verified and user else
-            'Veriler gecikmelidir; **grafik referans amaçlı olup yatırım tavsiyesi değildir.**' }}
+          {{ 'Pozisyon modu:' if referral_verified and user else
+            'Bazı özelliklere erişim sınırlıdır. Erişiminizi genişletmek için platforma giriş yapabilirsiniz.' }}
+              {% if user %}
+              <span id="mode-chip" class="hidden inline-flex ..."></span>
+              {% endif %}
           </div>
         </div>
       </div>
@@ -194,7 +203,7 @@
               <!-- Unrealized PnL Long -->
               <li id="qb-upnl-long-row" class="hidden flex items-center justify-between">
                 <div class="tooltip">
-                  <span>Gerçekleşmemiş PnL (L)</span>
+                  <span id="qb-upnl-long-label">Gerçekleşmemiş PnL (L)</span>
                   <span class="circle-icon" role="button" tabindex="0" aria-label="Bilgi" aria-describedby="tt-upnl-l">
                     <span aria-hidden="true">i</span>
                     <span id="tt-upnl-l" class="tooltiptext" role="tooltip">

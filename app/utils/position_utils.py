@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 # app/utils/position_utils.py
 # python 3.9
-from decimal import Decimal
+
+from decimal import Decimal, InvalidOperation
 import logging
 from datetime import datetime
 from sqlalchemy import update, select, func
+from typing import cast
+from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import StrategyOpenTrade
 
@@ -22,6 +25,10 @@ async def confirm_open_trade(
       - positionSide == BOTH       → one-way; yönü positionAmt işaretinden seç
     ONE-WAY (BOTH) durumda ters bacak açıksa kapatır (aynı sembol+exchange için tek açık kayıt).
     """
+    # ORM alanlarına commit/flush sonrası dokunmamak için scalarlari baştan al
+    sym = trade.symbol
+    ex = trade.exchange
+    tid = trade.id
     try:
         entry_price = Decimal(str(position_data.get("entryPrice", 0)))
         position_amt = Decimal(
@@ -29,7 +36,7 @@ async def confirm_open_trade(
         )
         leverage = int(float(position_data.get("leverage", 1)))
         position_side = str(position_data.get("positionSide", "BOTH")).upper()
-    except Exception as e:
+    except (InvalidOperation, ValueError, TypeError) as e:
         logger.warning(f"[confirm_open_trade parse error] {e}")
         return
 
@@ -48,8 +55,7 @@ async def confirm_open_trade(
     # Guardlar
     if not decided_side or entry_price <= 0 or position_amt.copy_abs() <= 0:
         logger.warning(
-            f"[confirm_open_trade] insufficient data "
-            f"(side={decided_side}, entry={entry_price}, amt={position_amt}) for {trade.symbol}"
+            f"(side={decided_side}, entry={entry_price}, amt={position_amt}) for {sym}"
         )
         return
 
@@ -58,8 +64,8 @@ async def confirm_open_trade(
         other_side = "short" if decided_side == "long" else "long"
         res = await db.execute(
             select(StrategyOpenTrade)
-            .where(func.upper(StrategyOpenTrade.symbol) == (trade.symbol or "").upper())
-            .where(StrategyOpenTrade.exchange == (trade.exchange or ""))
+            .where(func.upper(StrategyOpenTrade.symbol) == (sym or "").upper())
+            .where(StrategyOpenTrade.exchange == (ex or ""))
             .where(StrategyOpenTrade.side == other_side)
             .where(StrategyOpenTrade.status == "open")
         )
@@ -72,7 +78,7 @@ async def confirm_open_trade(
     now = datetime.utcnow()
     await db.execute(
         update(StrategyOpenTrade)
-        .where(StrategyOpenTrade.id == trade.id)
+        .where(cast(ColumnElement[bool], StrategyOpenTrade.id == tid))
         .values(
             side=decided_side,
             entry_price=entry_price,
@@ -86,7 +92,7 @@ async def confirm_open_trade(
     )
     await db.flush()
     logger.info(
-        f"[confirm_open_trade] {trade.symbol} side={decided_side},"
+        f"[confirm_open_trade] {sym} side={decided_side},"
         f" entry={entry_price}, size={position_amt}, lev={leverage}"
     )
 
@@ -100,6 +106,6 @@ def position_matches(position: dict) -> bool:
     has_position = amt > Decimal("0")
 
     logger.debug(
-        f"🔍 Pozisyon durumu → has_position={has_position}, positionAmt={amt}, entryPrice={entry_price}"
+        f"Pozisyon durumu → has_position={has_position}, positionAmt={amt}, entryPrice={entry_price}"
     )
     return has_position

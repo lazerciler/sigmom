@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# app/exchanges/binance_futures_testnet/order_handler.py
+# app/exchanges/binance_futures_mainnet/order_handler.py
 # Python 3.9
 
 import logging
@@ -139,7 +139,7 @@ async def place_order(
     if blocked:
         return {"success": False, "message": "SAFETY_HOLD: " + reason, "data": {}}
 
-    """Binance Futures testnet üzerinde bir piyasa emri gönderir."""
+    """Binance Futures mainnet üzerinde bir piyasa emri gönderir."""
     if signal_data.order_type.lower() != "market":
         raise ValueError("Limit orders are not currently supported by the system.")
 
