@@ -2,12 +2,13 @@
 # crud/trade.py
 # Python 3.9
 
-from decimal import Decimal, InvalidOperation
-from importlib import import_module
 import uuid
 import logging
-from datetime import datetime, timedelta
 import asyncio
+
+from decimal import Decimal, InvalidOperation
+from importlib import import_module
+from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, update, desc, func, and_
 from typing import Union, Optional, List, cast
@@ -29,18 +30,6 @@ async def find_merge_candidate(
     Aynı (symbol, exchange, side, fund_manager) için 'open' ya da 'pending' durumdaki
     en güncel açık pozisyonu döndürür.
     """
-    # q = (
-    #     select(StrategyOpenTrade)
-    #     .where(
-    #         func.upper(StrategyOpenTrade.symbol) == (symbol or "").strip().upper(),
-    #         StrategyOpenTrade.exchange == (exchange or "").strip(),
-    #         StrategyOpenTrade.side == (side or "").strip().lower(),
-    #         StrategyOpenTrade.fund_manager_id == (fund_manager_id or "").strip(),
-    #         StrategyOpenTrade.status.in_(("open", "pending")),
-    #     )
-    #     .order_by(desc(StrategyOpenTrade.id))
-    #     .limit(1)
-    # )
     # Koşulları tek tek zincirleyerek ekle (IDE'nin 'bool' şüphesini kaldırır)
     q = select(StrategyOpenTrade)
     q = q.where(func.upper(StrategyOpenTrade.symbol) == (symbol or "").strip().upper())
@@ -107,11 +96,6 @@ async def get_open_trade_for_close(
     sym = (symbol or "").strip().upper()
     ex = (exchange or "").strip()
 
-    # if public_id:
-    #     q = select(StrategyOpenTrade).where(
-    #         StrategyOpenTrade.public_id == public_id,
-    #         StrategyOpenTrade.status == "open",
-    #     )
     if public_id:
         q = select(StrategyOpenTrade).where(
             and_(
@@ -122,17 +106,6 @@ async def get_open_trade_for_close(
         res = await db.execute(q)
         return res.scalar_one_or_none()
 
-    # conds = [
-    #     func.upper(StrategyOpenTrade.symbol) == sym,
-    #     StrategyOpenTrade.exchange == ex,
-    #     StrategyOpenTrade.status == "open",
-    # ]
-    # if fund_manager_id:
-    #     conds.append(StrategyOpenTrade.fund_manager_id == fund_manager_id.strip())
-    # if side:
-    #     conds.append(StrategyOpenTrade.side == side.strip().lower())
-    # # q = select(StrategyOpenTrade).where(*conds).order_by(desc(StrategyOpenTrade.id))
-    # q = select(StrategyOpenTrade).where(and_(*conds)).order_by(desc(StrategyOpenTrade.id))
     q = select(StrategyOpenTrade)
     q = q.where(func.upper(StrategyOpenTrade.symbol) == sym)
     q = q.where(StrategyOpenTrade.exchange == ex)
@@ -149,6 +122,9 @@ async def get_open_trade_for_close(
     return res.scalars().first()
 
 
+LOGGER = logging.getLogger("verifier")
+
+
 async def close_open_trade_and_record(
     db: AsyncSession, open_trade: StrategyOpenTrade, position_data: dict
 ):
@@ -158,19 +134,15 @@ async def close_open_trade_and_record(
     - StrategyTrade tablosuna yazılır,
     - StrategyOpenTrade status='closed' yapılır.
     """
-    logger = logging.getLogger("verifier")
+
+    # --- Lazy load/expire sorunlarına karşı gerekli alanları snapshota al ---
+    _ot_id = getattr(open_trade, "id", None)
+    _ot_sym = getattr(open_trade, "symbol", None)
+    _ot_side = getattr(open_trade, "side", None)
+    _ot_fm = getattr(open_trade, "fund_manager_id", None)
+    _ot_exch = getattr(open_trade, "exchange", None)
 
     try:
-        # 1) ATOMİK DURUM GEÇİŞİ: OPEN → CLOSED (koşullu UPDATE)
-        #    Aynı anda iki taraf denese de yalnız biri 1 satır etkiler; diğeri 0 satır görür.
-        # res = await db.execute(
-        #     update(StrategyOpenTrade)
-        #     .where(
-        #         StrategyOpenTrade.id == trade.id,
-        #         StrategyOpenTrade.status == "open",
-        #     )
-        #     .values(status="closed")
-        # )
         res = await db.execute(
             update(StrategyOpenTrade)
             .where(
@@ -183,16 +155,11 @@ async def close_open_trade_and_record(
         )
         if (res.rowcount or 0) == 0:
             # Başkası bizden önce kapatmış; tekrar trade yazmayalım.
-            logger.info(f"[idempotent-skip] already closed → {open_trade.public_id}")
+            LOGGER.info("[idempotent-skip] already closed → %s", open_trade.public_id)
             await db.rollback()
             return True
 
         # 2) Kayıt kapandıktan sonra güncel halini getir (audit için)
-        # trade = (
-        #     await db.execute(
-        #         select(StrategyOpenTrade).where(StrategyOpenTrade.id == open_trade.id)
-        #     )
-        # ).scalar_one()
         trade = (
             await db.execute(
                 select(StrategyOpenTrade).where(
@@ -231,13 +198,14 @@ async def close_open_trade_and_record(
                     )
                     if res and res.get("success"):
                         close_price = Decimal(str(res["price"]))
-                        logging.getLogger("verifier").info(
-                            f"[fallback-vwap] {open_trade.symbol} price={close_price} (fills={res.get('fills')})"
+                        LOGGER.info(
+                            "[fallback-vwap] %s price=%s (fills=%s)",
+                            open_trade.symbol,
+                            close_price,
+                            res.get("fills"),
                         )
         except Exception as _e:
-            logging.getLogger("verifier").warning(
-                f"[fallback-vwap-fail] {open_trade.symbol}: {_e}"
-            )
+            LOGGER.warning("[fallback-vwap-fail] %s: %s", open_trade.symbol, _e)
 
         if close_price is None:
             raise ValueError("close_price could not be determined")
@@ -251,7 +219,7 @@ async def close_open_trade_and_record(
             "markPrice",
         )
         _src = next((k for k in _keys if str(position_data.get(k)).strip()), None)
-        logger.info(f"[close-price-source] {open_trade.symbol} → vwap={close_price}")
+        LOGGER.info("[close-price-source] %s → vwap=%s", open_trade.symbol, close_price)
 
         # --- Zorunlu alanlar / guard'lar ---
         open_price = Decimal(str(open_trade.entry_price))
@@ -309,7 +277,7 @@ async def close_open_trade_and_record(
         try:
             await db.commit()
         except Exception as e:
-            logger.exception(f"[DB-COMMIT-FAIL] {e}")
+            LOGGER.exception("[DB-COMMIT-FAIL] %s", e)
             await db.rollback()
             return False
 
@@ -328,26 +296,37 @@ async def close_open_trade_and_record(
             )
             row = result.fetchone()
             if row:
-                logger.info(
-                    f"[DB-VERIFY] Trade kaydı bulundu → ID: {row.id}, "
-                    f"Symbol: {row.symbol}, PnL: {row.realized_pnl}"
+                LOGGER.info(
+                    "[DB-VERIFY] Trade kaydı bulundu → ID: %s, Symbol: %s, PnL: %s",
+                    row.id,
+                    row.symbol,
+                    row.realized_pnl,
                 )
             else:
-                logger.warning(
-                    f"[DB-VERIFY] Commit sonrası trade kaydı BULUNAMADI! → open_trade_public_id={open_trade.public_id}"
+                LOGGER.warning(
+                    "[DB-VERIFY] Commit sonrası trade kaydı BULUNAMADI! → open_trade_public_id=%s",
+                    open_trade.public_id,
                 )
         except Exception as e:
-            logger.exception(f"[DB-VERIFY-FAIL] {e}")
+            LOGGER.exception("[DB-VERIFY-FAIL] %s", e)
 
-        logger.info(
-            f"[closed-recorded] {open_trade.symbol} → PnL: {pnl:.2f} was written and open trade status set to CLOSED."
+        LOGGER.info(
+            "[closed-recorded] %s → PnL: %.2f was written and open trade status set to CLOSED.",
+            _ot_sym,
+            pnl,
         )
         return True
 
     except Exception as e:
-        await db.rollback()
-        logger.exception(
-            f"[close-fail] {open_trade.symbol} position closing record failed: {e}"
+        # ORM alanlarına dokunmadan snapshot ile logla → MissingGreenlet’i engeller
+        LOGGER.error(
+            "[close-fail] id=%s sym=%s side=%s fm=%s exch=%s err=%s",
+            _ot_id,
+            _ot_sym,
+            _ot_side,
+            _ot_fm,
+            _ot_exch,
+            e,
         )
         return False
 
@@ -362,13 +341,6 @@ async def increment_attempt_count(db: AsyncSession, trade_id: int) -> None:
             last_checked_at=datetime.utcnow(),
         )
     )
-    # # Değişikliği yaptıktan sonra modeli geri çekip return etmeli
-    # result = await db.execute(
-    #     select(StrategyOpenTrade).where(StrategyOpenTrade.id == trade_id)
-    # )
-    # trade = result.scalar_one()
-    # return trade
-
     # Burada ORM dönmek gereksiz ve riskli (commit sonrası akses tetikleyebilir)
     # Çağıranlar dönüş değerini kullanmıyor; None dön.
     return None
@@ -378,7 +350,6 @@ async def get_pending_open_trades(db: AsyncSession) -> list[StrategyOpenTrade]:
     result = await db.execute(
         select(StrategyOpenTrade).where(StrategyOpenTrade.status == "pending")
     )
-    # return result.scalars().all()
     return cast(List[StrategyOpenTrade], result.scalars().all())
 
 
@@ -416,13 +387,13 @@ async def verify_pending_trades_for_execution(
     Başarılıysa status="open", exchange_verified=True;
     retry aşıldıysa status="failed".
     """
-    verifier_logger = logging.getLogger("verifier")
+    verifier_logger = LOGGER
 
     result = await db.execute(
         select(StrategyOpenTrade).where(StrategyOpenTrade.status == "pending")
     )
     pending_trades = result.scalars().all()
-    verifier_logger.info(f"[loop] {len(pending_trades)} pending trade found")
+    verifier_logger.info("[loop] %s pending trade found", len(pending_trades))
 
     for open_trade in pending_trades:
         now = datetime.utcnow()
@@ -430,32 +401,36 @@ async def verify_pending_trades_for_execution(
         if open_trade.last_checked_at and (
             now - open_trade.last_checked_at
         ) < timedelta(seconds=5):
-            verifier_logger.debug(f"[skip] {open_trade.symbol} - checked too recently")
+            verifier_logger.debug("[skip] %s - checked too recently", open_trade.symbol)
             continue
 
         verifier_logger.debug(
-            f"[verify-start] {open_trade.symbol} | side: {open_trade.side}, "
-            f"size: {open_trade.position_size}"
+            "[verify-start] %s | side: %s, size: %s",
+            open_trade.symbol,
+            open_trade.side,
+            open_trade.position_size,
         )
         verifier_logger.debug(
-            f"🧩 execution.order_handler.get_position: "
-            f"{getattr(execution.order_handler, 'get_position', 'NONE')}"
+            "execution.order_handler.get_position: %s",
+            getattr(execution.order_handler, "get_position", "NONE"),
         )
 
         try:
             position = await execution.order_handler.get_position(open_trade.symbol)
         except Exception as e:
             verifier_logger.warning(
-                f"[exception] get_position({open_trade.symbol}) exception: {e}"
+                "[exception] get_position(%s) exception: %s", open_trade.symbol, e
             )
             continue
 
-        verifier_logger.debug(f"[position] {open_trade.symbol}: {position!r}")
-        verifier_logger.debug(f"Position was brought: {open_trade.symbol} → {position}")
+        verifier_logger.debug("[position] %s: %r", open_trade.symbol, position)
+        verifier_logger.debug(
+            "Position was brought: %s → %s", open_trade.symbol, position
+        )
 
         if not position:
             verifier_logger.warning(
-                f"[no-position] Could not get a position for {open_trade.symbol}"
+                "[no-position] Could not get a position for %s", open_trade.symbol
             )
             continue
 
@@ -465,7 +440,7 @@ async def verify_pending_trades_for_execution(
             open_trade.exchange_verified = True
             open_trade.confirmed_at = now
             await confirm_open_trade(db, open_trade, position)
-            verifier_logger.info(f"[verified] {open_trade.symbol} position confirmed.")
+            verifier_logger.info("[verified] %s position confirmed.", open_trade.symbol)
         else:
             await increment_attempt_count(db, open_trade.id)
             await db.refresh(open_trade)
@@ -473,13 +448,16 @@ async def verify_pending_trades_for_execution(
             if open_trade.verification_attempts >= max_retries:
                 open_trade.status = "failed"
                 verifier_logger.warning(
-                    f"[failed] {open_trade.symbol} max retries "
-                    f"({max_retries}) exceeded, position is invalid."
+                    "[failed] %s max retries (%s) exceeded, position is invalid.",
+                    open_trade.symbol,
+                    max_retries,
                 )
             else:
                 verifier_logger.debug(
-                    f"[retry] {open_trade.symbol} retries "
-                    f"{open_trade.verification_attempts}/{max_retries}"
+                    "[retry] %s retries %s/%s",
+                    open_trade.symbol,
+                    open_trade.verification_attempts,
+                    max_retries,
                 )
 
         open_trade.last_checked_at = now
@@ -527,9 +505,7 @@ async def verify_close_after_signal(
         try:
             position = await execution.order_handler.get_position(symbol)
         except Exception as e:
-            logging.getLogger("verifier").warning(
-                f"[close-check] get_position({symbol}) ex: {e}"
-            )
+            LOGGER.warning("[close-check] get_position(%s) ex: %s", symbol, e)
             position = None
 
         # KAPANDI mı? (one-way için net 0, hedge için kaba yaklaşım: işaret değişti ya da 0)
@@ -545,8 +521,8 @@ async def verify_close_after_signal(
             ok = await close_open_trade_and_record(db, open_trade, position or {})
             if ok:
                 return True
-            logging.getLogger("verifier").error(
-                f"[close-fail-after-signal] could not record close for {symbol}"
+            LOGGER.error(
+                "[close-fail-after-signal] could not record close for %s", symbol
             )
             return False
 
@@ -556,8 +532,10 @@ async def verify_close_after_signal(
         await asyncio.sleep(interval_seconds)
 
     # Hâlâ kapanmadı → açık bırak, logla
-    logging.getLogger("verifier").warning(
-        f"[close-timeout] {symbol} not closed after {max_retries} tries; keeping OPEN."
+    LOGGER.warning(
+        "[close-timeout] %s not closed after %s tries; keeping OPEN.",
+        symbol,
+        max_retries,
     )
     return False
 
@@ -655,18 +633,6 @@ async def insert_strategy_trade(db: AsyncSession, signal_data, order_response: d
 async def get_open_trade_by_symbol_and_exchange(
     db: AsyncSession, symbol: str, exchange: str
 ):
-    # # query = select(StrategyOpenTrade).where(
-    # #     StrategyOpenTrade.symbol == symbol, StrategyOpenTrade.exchange == exchange
-    # # )
-    # query = select(StrategyOpenTrade).where(
-    #     and_(StrategyOpenTrade.symbol == symbol, StrategyOpenTrade.exchange == exchange)
-    # )
-
-    # Zincirli where: IDE'nin 'bool' şikâyetini kesin olarak engeller
-
-    # query = select(StrategyOpenTrade)
-    # query = query.where(StrategyOpenTrade.symbol == symbol)
-    # query = query.where(StrategyOpenTrade.exchange == exchange)
     query = select(StrategyOpenTrade)
     query = query.where(cast(ColumnElement[bool], StrategyOpenTrade.symbol == symbol))
     query = query.where(
@@ -690,16 +656,6 @@ async def delete_strategy_open_trade(db: AsyncSession, symbol: str, exchange: st
     """
     Belirtilen sembol ve borsaya ait açık pozisyon kaydını siler.
     """
-    # query = delete(StrategyOpenTrade).where(
-    #     StrategyOpenTrade.symbol == symbol, StrategyOpenTrade.exchange == exchange
-    # )
-    # query = delete(StrategyOpenTrade).where(
-    #     and_(StrategyOpenTrade.symbol == symbol, StrategyOpenTrade.exchange == exchange)
-    # )
-
-    # query = delete(StrategyOpenTrade)
-    # query = query.where(StrategyOpenTrade.symbol == symbol)
-    # query = query.where(StrategyOpenTrade.exchange == exchange)
     query = delete(StrategyOpenTrade)
     query = query.where(cast(ColumnElement[bool], StrategyOpenTrade.symbol == symbol))
     query = query.where(

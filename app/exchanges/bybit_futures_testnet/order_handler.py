@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-# app/exchanges/binance_futures_mainnet/order_handler.py
+# app/exchanges/bybit_futures_testnet/order_handler.py
 # Python 3.9
 
 import logging
 import httpx
 import uuid
 import asyncio
+import json
 
 from app.exchanges.common.http.retry import arequest_with_retry
 from app.models import StrategyOpenTrade
@@ -44,7 +45,6 @@ __all__ = [
     "place_order",
     "get_position",
     "query_order_status",
-    "income_breakdown",  # dağılım/kalem kalem gelir
 ]
 
 
@@ -119,14 +119,12 @@ async def place_order(
     if blocked:
         return {"success": False, "message": "SAFETY_HOLD: " + reason, "data": {}}
 
-    """Binance Futures Mainnet üzerinde bir piyasa emri gönderir."""
+    """Bybit V5 testnet üzerinde bir piyasa emri gönderir."""
     if signal_data.order_type.lower() != "market":
         raise ValueError("Limit orders are not currently supported by the system.")
 
-    endpoint = ENDPOINTS["ORDER"]
-    url = BASE_URL + endpoint
+    url = BASE_URL + ENDPOINTS["ORDER"]
     symbol = signal_data.symbol.upper()
-    order_type = "MARKET"
     quantity = await adjust_quantity(symbol, signal_data.position_size)
     mode = signal_data.mode or ""
     side_in = signal_data.side or ""
@@ -135,55 +133,60 @@ async def place_order(
     )
 
     params: dict[str, Any] = {
+        "category": "linear",
         "symbol": symbol,
-        "side": api_side,
-        "type": order_type,
-        "quantity": quantity,
+        "side": "Buy" if api_side == "BUY" else "Sell",
+        "orderType": "Market",
+        "qty": str(quantity),
     }
 
     if reduce_only:
-        params["reduceOnly"] = "true"
+        params["reduceOnly"] = True
 
     if position_side is not None:
-        params["positionSide"] = position_side
-        # Emniyet: Hedge modda reduceOnly asla gönderilmemeli
+        # Bybit hedge modunda bacak → positionIdx: 1=LONG, 2=SHORT
+        params["positionIdx"] = 1 if position_side == "LONG" else 2
+        # Emniyet: hedge modda reduceOnly göndermeyelim
         params.pop("reduceOnly", None)
 
     # clientOrderId opsiyonel → yoksa servis tarafında üret (idempotency için faydalı)
     if client_order_id:
-        params["newClientOrderId"] = client_order_id
+        params["orderLinkId"] = client_order_id
     else:
-        params["newClientOrderId"] = f"svc-{uuid.uuid4().hex[:8]}"
+        params["orderLinkId"] = f"svc-{uuid.uuid4().hex[:8]}"
     full_url, headers = await build_signed_post(url, params, recv_window=RECV_WINDOW_MS)
 
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SHORT) as client:
-            response = await arequest_with_retry(
-                client,
-                "POST",
-                full_url,
-                headers=headers,
-                timeout=HTTP_TIMEOUT_SHORT,
-                max_retries=1,
-                retry_on_binance_1021=True,
-                # -1021 olursa taze ts/imza ile yeniden POST hazırla
-                rebuild_async=lambda: build_signed_post(
-                    url, params, recv_window=RECV_WINDOW_LONG_MS
-                ),
+            body = json.dumps(params).encode("utf-8")
+            # 1. deneme
+            response = await client.post(
+                full_url, headers=headers, content=body, timeout=HTTP_TIMEOUT_SHORT
             )
-            response.raise_for_status()
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError:
+                # 2. deneme: taze imza/ts ile yeniden hazırla
+                full_url, headers = await build_signed_post(
+                    url, params, recv_window=RECV_WINDOW_LONG_MS
+                )
+                body = json.dumps(params).encode("utf-8")
+                response = await client.post(
+                    full_url, headers=headers, content=body, timeout=HTTP_TIMEOUT_SHORT
+                )
+                response.raise_for_status()
             data = response.json()
             # Üst katman sorgulamak isterse kimlikleri net döndür
             return {
                 "success": True,
                 "data": data,
-                "orderId": data.get("orderId"),
-                "clientOrderId": data.get("clientOrderId")
-                or params.get("newClientOrderId"),
+                "orderId": (data.get("result") or {}).get("orderId"),
+                "clientOrderId": (data.get("result") or {}).get("orderLinkId")
+                or params.get("orderLinkId"),
             }
     except httpx.HTTPStatusError as exc:
         logger.error(
-            "Binance API Error %s: %s", exc.response.status_code, exc.response.text
+            "Bybit API Error %s: %s", exc.response.status_code, exc.response.text
         )
         return {"success": False, "message": exc.response.text, "data": {}}
     except (httpx.RequestError, asyncio.TimeoutError) as e:
@@ -192,15 +195,12 @@ async def place_order(
 
 
 async def get_position(symbol: str, side: Optional[str] = None) -> dict:
-    """Binance Futures pozisyon bilgilerini alır."""
+    """Bybit V5 pozisyon bilgilerini alır."""
     logger.debug("get_position() → %s", symbol)
-    endpoint = ENDPOINTS["POSITION_RISK"]
-    url = BASE_URL + endpoint
+    url = BASE_URL + ENDPOINTS["POSITION_RISK"]
     sym = (symbol or "").upper()
 
-    params: dict[str, Any] = {
-        "symbol": sym,
-    }
+    params: dict[str, Any] = {"category": "linear", "symbol": sym}
 
     full_url, headers = await build_signed_get(url, params, recv_window=RECV_WINDOW_MS)
     try:
@@ -212,7 +212,6 @@ async def get_position(symbol: str, side: Optional[str] = None) -> dict:
                 headers=headers,
                 timeout=HTTP_TIMEOUT_SHORT,
                 max_retries=1,
-                retry_on_binance_1021=True,
                 rebuild_async=lambda: build_signed_get(
                     url, params, recv_window=RECV_WINDOW_LONG_MS
                 ),
@@ -231,28 +230,25 @@ async def get_position(symbol: str, side: Optional[str] = None) -> dict:
         logger.error("Network error while fetching position %s: %s", sym, exc)
         return {}
 
-    if isinstance(data, list):
-        # Sembol filtrele
-        cands = [p for p in data if p.get("symbol") == sym]
-        if not cands:
-            logger.error("Position for %s not found: %s", sym, data)
-            return {}
-        # Hedge: doğru bacağı seç
-        side_norm = (side or "").strip().lower()
-        if POSITION_MODE == "hedge" and side_norm in ("long", "short"):
-            target = "LONG" if side_norm == "long" else "SHORT"
-            for p in cands:
-                if p.get("positionSide") == target:
-                    return p
-        for p in cands:
-            try:
-                if float(p.get("positionAmt", "0")) != 0.0:
-                    return p
-            except (ValueError, TypeError):
-                pass
-        return cands[0]
-    logger.error("Position for %s not found (non-list): %s", sym, data)
-    return {}
+    # Bybit V5: {"result":{"list":[...]}}
+    lst = (data.get("result") or {}).get("list") if isinstance(data, dict) else None
+    rows = lst if isinstance(lst, list) else []
+    if not rows:
+        logger.error("Position for %s not found: %s", sym, data)
+        return {}
+    side_norm = (side or "").strip().lower()
+    if POSITION_MODE == "hedge" and side_norm in ("long", "short"):
+        want_idx = 1 if side_norm == "long" else 2
+        for p in rows:
+            if int(str(p.get("positionIdx", 0))) == want_idx:
+                return p
+    for p in rows:
+        try:
+            if float(p.get("size", "0")) != 0.0:
+                return p
+        except (ValueError, TypeError):
+            pass
+    return rows[0]
 
 
 async def query_order_status(
@@ -260,16 +256,18 @@ async def query_order_status(
     order_id: Optional[str] = None,
     client_order_id: Optional[str] = None,
 ) -> dict:
-    """Binance Futures'ta bir order'ın durumunu kontrol eder."""
+    """Bybit V5'te bir order'ın durumunu kontrol eder."""
     try:
-        endpoint = ENDPOINTS["ORDER"]
-        url = BASE_URL + endpoint
+        url = BASE_URL + ENDPOINTS["ORDER_STATUS"]
 
-        params: dict[str, Any] = {"symbol": (symbol or "").upper()}
+        params: dict[str, Any] = {
+            "category": "linear",
+            "symbol": (symbol or "").upper(),
+        }
         if order_id:
             params["orderId"] = order_id
         elif client_order_id:
-            params["origClientOrderId"] = client_order_id
+            params["orderLinkId"] = client_order_id
         else:
             return {"success": False, "message": "order_id or client_order_id required"}
 
@@ -285,14 +283,21 @@ async def query_order_status(
                 headers=headers,
                 timeout=HTTP_TIMEOUT_SHORT,
                 max_retries=1,
-                retry_on_binance_1021=True,
                 rebuild_async=lambda: build_signed_get(
                     url, params, recv_window=RECV_WINDOW_LONG_MS
                 ),
             )
             response.raise_for_status()
             data = response.json()
-            return {"success": True, "status": data.get("status"), "data": data}
+            status = None
+            lst = (
+                (data.get("result") or {}).get("list")
+                if isinstance(data, dict)
+                else None
+            )
+            if isinstance(lst, list) and lst:
+                status = lst[0].get("orderStatus")
+            return {"success": True, "status": status, "data": data}
     except httpx.HTTPStatusError as e:
         # Non-200 yanıtları burada yakalayıp mesajı döndür
         return {

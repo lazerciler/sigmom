@@ -7,15 +7,21 @@ import httpx
 import re
 import time
 
+from app.exchanges.common.http.retry import arequest_with_retry
 from datetime import datetime, timezone
 from typing import Optional, Any, Iterable, Dict, Tuple, cast, Union
-from urllib.parse import urlencode
-
-from .settings import BASE_URL, ENDPOINTS, POSITION_MODE, USERTRADES_LOOKBACK_MS
+from .settings import (
+    BASE_URL,
+    ENDPOINTS,
+    POSITION_MODE,
+    USERTRADES_LOOKBACK_MS,
+    RECV_WINDOW_MS,
+    RECV_WINDOW_LONG_MS,
+    HTTP_TIMEOUT_SHORT,
+    HTTP_TIMEOUT_LONG,
+)
 from .utils import (
-    sign_payload,
-    get_binance_server_time,
-    get_signed_headers,
+    build_signed_get,
     quantize_price,
 )
 
@@ -71,19 +77,17 @@ async def get_account_balance():
     endpoint = ENDPOINTS["BALANCE"]
     url = BASE_URL + endpoint
 
-    # 1) Sunucu saatine göre ts
-    try:
-        ts = await get_binance_server_time()
-    except (httpx.HTTPError, asyncio.TimeoutError, ValueError, TypeError):
-        ts = int(time.time() * 1000)
-    # 2) Sıralı query + aynı sırayla imza ve gönderim
-    params = {"timestamp": ts, "recvWindow": 5000}
-    query = urlencode(_sorted_items(params))
-    sig = sign_payload(params)
-    headers = get_signed_headers()  # {"X-MBX-APIKEY": API_KEY}
-    async with httpx.AsyncClient() as client:
-        r = await client.get(
-            f"{url}?{query}&signature={sig}", headers=headers, timeout=15
+    # imzalı URL + header
+    full_url, headers = await build_signed_get(url, {})
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SHORT) as client:
+        r = await arequest_with_retry(
+            client,
+            "GET",
+            full_url,
+            headers=headers,
+            timeout=HTTP_TIMEOUT_SHORT,
+            max_retries=1,
+            retry_on_binance_1021=False,
         )
         r.raise_for_status()
         return r.json()
@@ -108,8 +112,14 @@ async def _get_exchange_info() -> dict:
     ep = ENDPOINTS.get("EXCHANGE_INFO")
     if not ep:
         return {}
-    async with httpx.AsyncClient() as client:
-        r = await client.get(BASE_URL + ep)
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_LONG) as client:
+        r = await arequest_with_retry(
+            client,
+            "GET",
+            BASE_URL + ep,
+            timeout=HTTP_TIMEOUT_LONG,
+            max_retries=1,
+        )
         r.raise_for_status()
         data = r.json()
         _EXINFO_CACHE.update({"t": now, "data": data})
@@ -138,20 +148,20 @@ async def get_unrealized(symbol: Optional[str] = None, return_all: bool = False)
     """
     ep = ENDPOINTS.get("POSITION_RISK", "/fapi/v2/positionRisk")
     url = BASE_URL + ep
-    try:
-        ts = await get_binance_server_time()
-    except (httpx.HTTPError, asyncio.TimeoutError, ValueError, TypeError):
-        ts = int(time.time() * 1000)
-    params = {"timestamp": ts, "recvWindow": 5000}
-    query = urlencode(_sorted_items(params))
-    sig = sign_payload(params)
-    headers = get_signed_headers()
-    async with httpx.AsyncClient() as client:
-        r = await client.get(
-            f"{url}?{query}&signature={sig}", headers=headers, timeout=15
+    full_url, headers = await build_signed_get(url, {})
+
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SHORT) as client:
+        r = await arequest_with_retry(
+            client,
+            "GET",
+            full_url,
+            headers=headers,
+            timeout=HTTP_TIMEOUT_SHORT,
+            max_retries=1,
+            retry_on_binance_1021=False,
         )
         r.raise_for_status()
-        rows = r.json()  # list[dict]
+        rows = r.json()
 
     # yalnızca açık (positionAmt != 0)
 
@@ -210,7 +220,7 @@ async def income_summary(
     Binance USDⓈ-M Futures gelir dökümünden (REALIZED_PNL) net toplamı döndürür.
     - symbol: 'BTCUSDT' gibi (opsiyonel)
     - since/until: datetime(UTC); sayfalama ile /fapi/v1/income taranır.
-    Not: mainnet'te de bu uç desteklenir; limit=1000 sayfalanır.
+    Not: Mainnet'te de bu uç desteklenir; limit=1000 sayfalanır.
     """
     ep = ENDPOINTS.get("INCOME", "/fapi/v1/income")
     url = BASE_URL + ep
@@ -218,46 +228,40 @@ async def income_summary(
     # Zaman damgaları (ms)
     start_ms = int((since or datetime.utcfromtimestamp(0)).timestamp() * 1000)
     end_ms: Optional[int] = int(until.timestamp() * 1000) if until else None
-
-    # Ortak başlıklar / imza
-    try:
-        ts = await get_binance_server_time()
-    except (httpx.HTTPError, asyncio.TimeoutError, ValueError, TypeError):
-        ts = int(time.time() * 1000)
-    headers = get_signed_headers()  # {"X-MBX-APIKEY": ...}
-
     total = 0.0
     page_guard = 0
     cursor = start_ms
     sym = _normalize_symbol(symbol) if symbol else None
 
-    async with httpx.AsyncClient(timeout=20.0) as client:
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_LONG) as client:
         while True:
             page_guard += 1
             if page_guard > 20:  # emniyet: 20k kayıt ~ 20 sayfa
                 break
 
-            params = {
-                "timestamp": ts,
-                "recvWindow": 5000,
-                "incomeType": "REALIZED_PNL",
-                "limit": 1000,
-                "startTime": cursor,
-            }
+            params = {"incomeType": "REALIZED_PNL", "limit": 1000, "startTime": cursor}
+
             if end_ms:
                 params["endTime"] = end_ms
             if sym:
                 params["symbol"] = sym
 
-            # İmza **parametrelerin sıralı hali** üzerinden
-            query = urlencode(_sorted_items(params))
-            sig = sign_payload(params)
-            r = await client.get(f"{url}?{query}&signature={sig}", headers=headers)
+            full_url, headers = await build_signed_get(
+                url, params, recv_window=RECV_WINDOW_LONG_MS
+            )
+            r = await arequest_with_retry(
+                client,
+                "GET",
+                full_url,
+                headers=headers,
+                timeout=HTTP_TIMEOUT_LONG,
+                max_retries=1,
+                retry_on_binance_1021=False,
+            )
             r.raise_for_status()
             rows = r.json() or []
             if not isinstance(rows, list) or not rows:
                 break
-
             # Toplamı ekle; bir sonraki sayfa için zaman imlecini güncelle
             last_time = cursor
 
@@ -411,27 +415,26 @@ async def get_close_price_from_usertrades(
     except (TypeError, ValueError) as e:
         return {"success": False, "message": f"invalid opened_at: {e}"}
     start_ms = max(0, int(start_ms) - int(USERTRADES_LOOKBACK_MS))
-    # server time (bağımsız)
-    try:
-        ts = await get_binance_server_time()
-    except (httpx.HTTPError, asyncio.TimeoutError, ValueError, TypeError):
-        ts = int(time.time() * 1000)
 
     params = {
         "symbol": sym,
-        "timestamp": ts,
-        "recvWindow": 5000,
         "limit": limit,
         "startTime": int(start_ms),
     }
-    query = urlencode(_sorted_items(params))
-    sig = sign_payload(params)
-    headers = get_signed_headers()
 
+    full_url, headers = await build_signed_get(url, params, recv_window=RECV_WINDOW_MS)
     # rows'u iç blokta doldurup hemen kullanıyoruz (IDE false-positive'lerini kapatmak için)
     try:
-        async with httpx.AsyncClient(timeout=12.0) as c:
-            r = await c.get(f"{url}?{query}&signature={sig}", headers=headers)
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_LONG) as c:
+            r = await arequest_with_retry(
+                c,
+                "GET",
+                full_url,
+                headers=headers,
+                timeout=HTTP_TIMEOUT_LONG,
+                max_retries=1,
+                retry_on_binance_1021=False,
+            )
             r.raise_for_status()
             rows = r.json() or []
     except httpx.HTTPStatusError as e:

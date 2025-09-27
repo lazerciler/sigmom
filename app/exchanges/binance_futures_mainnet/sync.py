@@ -4,33 +4,32 @@
 
 import logging
 import httpx
-from .settings import API_KEY, BASE_URL, ENDPOINTS
-from .utils import sign_payload, get_binance_server_time
+
+from app.exchanges.common.http.retry import arequest_with_retry
+from .settings import BASE_URL, ENDPOINTS, HTTP_TIMEOUT_SHORT
+from .utils import build_signed_get
 
 logger = logging.getLogger(__name__)
 
 
 async def get_open_position(symbol: str) -> dict:
     """
-    Binance Futures mainnet üzerinde verilen sembol için açık pozisyonu getirir.
+    Binance Futures Mainnet üzerinde verilen sembol için açık pozisyonu getirir.
     """
     try:
         endpoint = ENDPOINTS["POSITION_RISK"]
-        url = f"{BASE_URL}{endpoint}"
+        params = {"symbol": symbol.upper()}
+        full_url, headers = await build_signed_get(f"{BASE_URL}{endpoint}", params)
 
-        # Tüm parametreler imzaya dahil edilmeli
-        params = {
-            "symbol": symbol.upper(),
-            "timestamp": await get_binance_server_time(),
-            "recvWindow": 7000,
-        }
-        signature = sign_payload(params)
-
-        headers = {"X-MBX-APIKEY": API_KEY}
-
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                url, params={**params, "signature": signature}, headers=headers
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SHORT) as client:
+            resp = await arequest_with_retry(
+                client,
+                "GET",
+                full_url,
+                headers=headers,
+                timeout=HTTP_TIMEOUT_SHORT,
+                max_retries=1,
+                retry_on_binance_1021=False,
             )
             resp.raise_for_status()
             data = resp.json()

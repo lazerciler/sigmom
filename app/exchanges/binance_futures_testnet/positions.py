@@ -2,8 +2,10 @@
 # app/exchanges/binance_futures_testnet/positions.py
 
 import httpx
-from .settings import BASE_URL, ENDPOINTS
-from .utils import sign_payload, get_binance_server_time, get_signed_headers
+
+from app.exchanges.common.http.retry import arequest_with_retry
+from .settings import BASE_URL, ENDPOINTS, HTTP_TIMEOUT_LONG, RECV_WINDOW_LONG_MS
+from .utils import build_signed_get
 
 
 async def get_open_positions():
@@ -12,16 +14,20 @@ async def get_open_positions():
     """
     endpoint = ENDPOINTS["POSITION_RISK"]
     url = BASE_URL + endpoint
+    full_url, headers = await build_signed_get(url)
 
-    params = {
-        "timestamp": await get_binance_server_time(),
-        "recvWindow": 5000,
-    }
-
-    params["signature"] = sign_payload(params)
-    headers = get_signed_headers()
-
-    async with httpx.AsyncClient() as client:
-        response = await client.get(url, params=params, headers=headers)
+    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_LONG) as client:
+        response = await arequest_with_retry(
+            client,
+            "GET",
+            full_url,
+            headers=headers,
+            timeout=HTTP_TIMEOUT_LONG,
+            max_retries=1,
+            retry_on_binance_1021=True,
+            rebuild_async=lambda: build_signed_get(
+                url, {}, recv_window=RECV_WINDOW_LONG_MS
+            ),
+        )
         response.raise_for_status()
         return response.json()

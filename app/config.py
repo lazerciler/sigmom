@@ -2,7 +2,7 @@
 # app/config.py
 # Python 3.9
 from pydantic import BaseSettings, Field, root_validator, validator
-from typing import List
+from typing import List, Optional
 
 
 class Settings(BaseSettings):
@@ -11,6 +11,49 @@ class Settings(BaseSettings):
     # Çoklu Borsa Yönetimi (CSV formatında, örn: "binance_futures_testnet,binance_futures_mainnet")
     ACTIVE_EXCHANGES: str = Field(..., env="ACTIVE_EXCHANGES")
     DEFAULT_EXCHANGE: str = Field(..., env="DEFAULT_EXCHANGE")
+
+    # Global varsayılanlar
+    HTTP_TIMEOUT_SYNC: float = Field(2.0, env="HTTP_TIMEOUT_SYNC")
+    HTTP_TIMEOUT_SHORT: float = Field(5.0, env="HTTP_TIMEOUT_SHORT")
+    HTTP_TIMEOUT_LONG: float = Field(15.0, env="HTTP_TIMEOUT_LONG")
+
+    # ... mevcut alanlar ...
+    FUTURES_RECV_WINDOW_MS: int = Field(7000, env="FUTURES_RECV_WINDOW_MS")
+    # Uzun pencere
+    FUTURES_RECV_WINDOW_LONG_MS: int = Field(15000, env="FUTURES_RECV_WINDOW_LONG_MS")
+
+    # ---- (Opsiyonel) borsa-bazlı override'lar: set edilmezse None kalsın ----
+    BINANCE_FUTURES_TESTNET_HTTP_TIMEOUT_SYNC: Optional[float] = Field(
+        None, env="BINANCE_FUTURES_TESTNET_HTTP_TIMEOUT_SYNC"
+    )
+    BINANCE_FUTURES_TESTNET_HTTP_TIMEOUT_SHORT: Optional[float] = Field(
+        None, env="BINANCE_FUTURES_TESTNET_HTTP_TIMEOUT_SHORT"
+    )
+    BINANCE_FUTURES_TESTNET_HTTP_TIMEOUT_LONG: Optional[float] = Field(
+        None, env="BINANCE_FUTURES_TESTNET_HTTP_TIMEOUT_LONG"
+    )
+    BINANCE_FUTURES_TESTNET_RECV_WINDOW_MS: Optional[int] = Field(
+        None, env="BINANCE_FUTURES_TESTNET_RECV_WINDOW_MS"
+    )
+    BINANCE_FUTURES_TESTNET_RECV_WINDOW_LONG_MS: Optional[int] = Field(
+        None, env="BINANCE_FUTURES_TESTNET_RECV_WINDOW_LONG_MS"
+    )
+
+    BINANCE_FUTURES_MAINNET_HTTP_TIMEOUT_SYNC: Optional[float] = Field(
+        None, env="BINANCE_FUTURES_MAINNET_HTTP_TIMEOUT_SYNC"
+    )
+    BINANCE_FUTURES_MAINNET_HTTP_TIMEOUT_SHORT: Optional[float] = Field(
+        None, env="BINANCE_FUTURES_MAINNET_HTTP_TIMEOUT_SHORT"
+    )
+    BINANCE_FUTURES_MAINNET_HTTP_TIMEOUT_LONG: Optional[float] = Field(
+        None, env="BINANCE_FUTURES_MAINNET_HTTP_TIMEOUT_LONG"
+    )
+    BINANCE_FUTURES_MAINNET_RECV_WINDOW_MS: Optional[int] = Field(
+        None, env="BINANCE_FUTURES_MAINNET_RECV_WINDOW_MS"
+    )
+    BINANCE_FUTURES_MAINNET_RECV_WINDOW_LONG_MS: Optional[int] = Field(
+        None, env="BINANCE_FUTURES_MAINNET_RECV_WINDOW_LONG_MS"
+    )
 
     # Doğrulama döngü intervali (saniye)
     VERIFY_INTERVAL_SECONDS: int = Field(5, env="VERIFY_INTERVAL_SECONDS")
@@ -48,18 +91,20 @@ class Settings(BaseSettings):
     GOOGLE_REDIRECT_URI: str = Field(
         "http://localhost:8000/auth/google/callback",
         env="GOOGLE_REDIRECT_URI",
-        # "https://localhost:8000/auth/google/callback", env="GOOGLE_REDIRECT_URI"
+        # Secure
+        # "https://localhost:8000/auth/google/callback",
+        # env="GOOGLE_REDIRECT_URI"
     )
-    ADMIN_EMAIL_WHITELIST: str = Field("", env="ADMIN_EMAIL_WHITELIST")
 
+    # Root admins
+    ADMIN_EMAIL_WHITELIST: str = Field("", env="ADMIN_EMAIL_WHITELIST")
     # Session Secret
     SESSION_SECRET: str = Field(..., env="SESSION_SECRET")
-
     # Allowed fund managers
     ALLOWED_FUND_MANAGER_IDS: str = Field("", env="ALLOWED_FUND_MANAGER_IDS")
 
     @validator("SESSION_SECRET")
-    def validate_session_secret(cls, v: str) -> str:
+    def validate_session_secret(cls, v: str) -> str:  # noqa: N805
         if not v or not v.strip():
             raise ValueError("SESSION_SECRET must be set and not empty")
         return v
@@ -75,7 +120,7 @@ class Settings(BaseSettings):
         ]
 
     @root_validator(pre=True)
-    def validate_default_exchange(cls, values):
+    def validate_default_exchange(cls, values):  # noqa: N805
         active = values.get("ACTIVE_EXCHANGES", "")
         default = values.get("DEFAULT_EXCHANGE", "")
         active_list = [x.strip() for x in active.split(",")]

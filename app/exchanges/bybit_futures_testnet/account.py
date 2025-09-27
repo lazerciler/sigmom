@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# app/exchanges/binance_futures_testnet/account.py
+# app/exchanges/bybit_futures_testnet/account.py
 # Python 3.9
 
 import asyncio
@@ -9,21 +9,15 @@ import time
 
 from app.exchanges.common.http.retry import arequest_with_retry
 from datetime import datetime, timezone
-from typing import Optional, Any, Iterable, Dict, Tuple, cast, Union
+from typing import Optional, Any, Dict, Tuple, cast, Union
 from .settings import (
     BASE_URL,
     ENDPOINTS,
-    POSITION_MODE,
-    USERTRADES_LOOKBACK_MS,
     RECV_WINDOW_MS,
-    RECV_WINDOW_LONG_MS,
     HTTP_TIMEOUT_SHORT,
     HTTP_TIMEOUT_LONG,
 )
-from .utils import (
-    build_signed_get,
-    quantize_price,
-)
+from .utils import build_signed_get
 
 # --- Tip güvenli query yardımcıları -------------------------------------------------
 # urlencode için (key, value) ikililerini **sıralı** ve tipli döndürmek üzere
@@ -71,14 +65,9 @@ def _to_ms(ts_like: Union[int, float, str, datetime]) -> int:
 
 
 async def get_account_balance():
-    """
-    Binance Futures hesabındaki tüm bakiyeleri döner.
-    """
-    endpoint = ENDPOINTS["BALANCE"]
-    url = BASE_URL + endpoint
-
-    # imzalı URL + header
-    full_url, headers = await build_signed_get(url, {})
+    """Bybit V5: /v5/account/wallet-balance"""
+    url = BASE_URL + ENDPOINTS["BALANCE"]
+    full_url, headers = await build_signed_get(url, {}, recv_window=RECV_WINDOW_MS)
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SHORT) as client:
         r = await arequest_with_retry(
             client,
@@ -87,7 +76,6 @@ async def get_account_balance():
             headers=headers,
             timeout=HTTP_TIMEOUT_SHORT,
             max_retries=1,
-            retry_on_binance_1021=False,
         )
         r.raise_for_status()
         return r.json()
@@ -98,32 +86,76 @@ _EXINFO_CACHE: Dict[str, Any] = {"t": 0, "data": None}
 
 
 def _unwrap_balances(rows: Any) -> list:
-    """/fapi/v2/balance bazen list, bazen {'balances':[...]} dönebilir."""
-    if isinstance(rows, dict) and "balances" in rows:
-        return list(rows["balances"])
-    return list(rows) if isinstance(rows, Iterable) else []
+    """
+    Bybit V5 wallet-balance normalizasyonu → [
+      {"asset":"USDT","availableBalance": "...","walletBalance":"..."},
+      ...
+    ]
+    """
+    if not isinstance(rows, dict):
+        return []
+    result = rows.get("result")
+    if not isinstance(result, dict):
+        return []
+    lst = result.get("list")
+    if not isinstance(lst, list):
+        return []
+    out = []
+    for acct in lst:
+        coins = acct.get("coin") if isinstance(acct, dict) else None
+        if not isinstance(coins, list):
+            continue
+        for c in coins:
+            asset = str(c.get("coin") or "").upper()
+            if not asset:
+                continue
+            out.append(
+                {
+                    "asset": asset,
+                    "availableBalance": c.get("availableToWithdraw")
+                    or c.get("availableBalance")
+                    or "0",
+                    "walletBalance": c.get("walletBalance") or "0",
+                }
+            )
+    return out
 
 
 async def _get_exchange_info() -> dict:
-    """/fapi/v1/exchangeInfo — 5 dk cache"""
+    """Bybit V5 instruments-info — 5 dk cache (exchangeInfo benzeri sadeleştirme)."""
     now = time.time()
     if _EXINFO_CACHE["data"] and (now - _EXINFO_CACHE["t"] < 300):
         return _EXINFO_CACHE["data"]
-    ep = ENDPOINTS.get("EXCHANGE_INFO")
+    ep = ENDPOINTS.get("INSTRUMENTS")
     if not ep:
         return {}
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_LONG) as client:
+        # Bybit: category=linear (USDT-M)
+        url = BASE_URL + ep
+        params = {"category": "linear"}
+        full_url, headers = await build_signed_get(
+            url, params, recv_window=RECV_WINDOW_MS
+        )
         r = await arequest_with_retry(
             client,
             "GET",
-            BASE_URL + ep,
+            full_url,
+            headers=headers,
             timeout=HTTP_TIMEOUT_LONG,
             max_retries=1,
         )
-        r.raise_for_status()
-        data = r.json()
-        _EXINFO_CACHE.update({"t": now, "data": data})
-        return data
+        data = r.json() or {}
+        # exchangeInfo benzeri sade ‘symbols’ listesi üret
+        symbols = []
+        lst = (data.get("result") or {}).get("list") or []
+        for it in lst:
+            sym = str(it.get("symbol") or "").upper()
+            quote = str(it.get("quoteCoin") or "").upper()
+            if sym:
+                symbols.append({"symbol": sym, "quoteAsset": quote})
+        shaped = {"symbols": symbols}
+        _EXINFO_CACHE.update({"t": now, "data": shaped})
+        return shaped
 
 
 def _normalize_symbol(sym: str) -> str:
@@ -146,9 +178,10 @@ async def get_unrealized(symbol: Optional[str] = None, return_all: bool = False)
         çağıran tarafça toplanabilir.
     Not: Dönen değerler doğrudan borsa yanıtından normalize edilir (örn. `unRealizedProfit`).
     """
-    ep = ENDPOINTS.get("POSITION_RISK", "/fapi/v2/positionRisk")
+    ep = ENDPOINTS.get("POSITION_RISK", "/v5/position/list")
     url = BASE_URL + ep
-    full_url, headers = await build_signed_get(url, {})
+    params = {"category": "linear"}
+    full_url, headers = await build_signed_get(url, params, recv_window=RECV_WINDOW_MS)
 
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SHORT) as client:
         r = await arequest_with_retry(
@@ -158,10 +191,10 @@ async def get_unrealized(symbol: Optional[str] = None, return_all: bool = False)
             headers=headers,
             timeout=HTTP_TIMEOUT_SHORT,
             max_retries=1,
-            retry_on_binance_1021=False,
         )
         r.raise_for_status()
-        rows = r.json()
+        data = r.json() or {}
+        rows = (data.get("result") or {}).get("list") or []
 
     # yalnızca açık (positionAmt != 0)
 
@@ -171,19 +204,26 @@ async def get_unrealized(symbol: Optional[str] = None, return_all: bool = False)
         except (TypeError, ValueError):
             return 0.0
 
-    open_pos = [p for p in rows if abs(fnum(p.get("positionAmt"))) > 0]
+    # Bybit: size alanı (string) ≠ 0 olanları açık kabul
+    open_pos = []
+    for p in rows:
+        try:
+            if abs(fnum(p.get("size"))) > 0.0:
+                open_pos.append(p)
+        except Exception:
+            continue
     if symbol:
         s = _normalize_symbol(symbol)
         legs = [
             {
                 "symbol": str(p.get("symbol", "")).upper(),
-                "positionSide": str(p.get("positionSide") or "").upper(),
-                "unRealizedProfit": fnum(p.get("unRealizedProfit")),
-                "positionAmt": fnum(p.get("positionAmt")),
-                "entryPrice": fnum(p.get("entryPrice")),
+                # Bybit: bacak için positionIdx (1=LONG, 2=SHORT); taraf metni döndürmüyoruz
+                "unRealizedProfit": fnum(p.get("unrealisedPnl")),
+                "positionAmt": fnum(p.get("size")),
+                "entryPrice": fnum(p.get("avgPrice")),
                 "leverage": fnum(p.get("leverage")),
                 "markPrice": fnum(p.get("markPrice")),
-                "liquidationPrice": fnum(p.get("liquidationPrice")),
+                "liquidationPrice": fnum(p.get("liqPrice")),
             }
             for p in open_pos
             if str(p.get("symbol", "")).upper() == s
@@ -195,12 +235,12 @@ async def get_unrealized(symbol: Optional[str] = None, return_all: bool = False)
     details = [
         {
             "symbol": str(p.get("symbol", "")).upper(),
-            "unrealized": fnum(p.get("unRealizedProfit")),
-            "position_amt": fnum(p.get("positionAmt")),
-            "entry_price": fnum(p.get("entryPrice")),
+            "unrealized": fnum(p.get("unrealisedPnl")),
+            "position_amt": fnum(p.get("size")),
+            "entry_price": fnum(p.get("avgPrice")),
             "leverage": fnum(p.get("leverage")),
             "mark_price": fnum(p.get("markPrice")),
-            "liquidation_price": fnum(p.get("liquidationPrice")),
+            "liquidation_price": fnum(p.get("liqPrice")),
         }
         for p in open_pos
     ]
@@ -217,37 +257,38 @@ async def income_summary(
     until: Optional[datetime] = None,
 ) -> float:
     """
-    Binance USDⓈ-M Futures gelir dökümünden (REALIZED_PNL) net toplamı döndürür.
+    Bybit V5: /v5/position/closed-pnl üzerinden kapatılan işlemlerin NET PnL toplamı.
     - symbol: 'BTCUSDT' gibi (opsiyonel)
-    - since/until: datetime(UTC); sayfalama ile /fapi/v1/income taranır.
-    Not: Testnet'te de bu uç desteklenir; limit=1000 sayfalanır.
+    - since/until: datetime(UTC) (opsiyonel); sağlanmazsa geniş aralık kullanılır.
+    Dönen: float (USDT cinsinden net PnL)
     """
-    ep = ENDPOINTS.get("INCOME", "/fapi/v1/income")
-    url = BASE_URL + ep
-
-    # Zaman damgaları (ms)
-    start_ms = int((since or datetime.utcfromtimestamp(0)).timestamp() * 1000)
-    end_ms: Optional[int] = int(until.timestamp() * 1000) if until else None
+    base = BASE_URL + "/v5/position/closed-pnl"
     total = 0.0
-    page_guard = 0
-    cursor = start_ms
+    cursor: Optional[str] = None
+
+    # Zaman aralığı → ms
+    start_ms: Optional[int] = (
+        int(since.replace(tzinfo=timezone.utc).timestamp() * 1000) if since else None
+    )
+    end_ms: Optional[int] = (
+        int(until.replace(tzinfo=timezone.utc).timestamp() * 1000) if until else None
+    )
     sym = _normalize_symbol(symbol) if symbol else None
 
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_LONG) as client:
         while True:
-            page_guard += 1
-            if page_guard > 20:  # emniyet: 20k kayıt ~ 20 sayfa
-                break
-
-            params = {"incomeType": "REALIZED_PNL", "limit": 1000, "startTime": cursor}
-
-            if end_ms:
-                params["endTime"] = end_ms
+            params: Dict[str, Any] = {"category": "linear", "limit": 200}
             if sym:
                 params["symbol"] = sym
+            if start_ms is not None:
+                params["startTime"] = start_ms
+            if end_ms is not None:
+                params["endTime"] = end_ms
+            if cursor:
+                params["cursor"] = cursor
 
             full_url, headers = await build_signed_get(
-                url, params, recv_window=RECV_WINDOW_LONG_MS
+                base, params, recv_window=RECV_WINDOW_MS
             )
             r = await arequest_with_retry(
                 client,
@@ -256,32 +297,27 @@ async def income_summary(
                 headers=headers,
                 timeout=HTTP_TIMEOUT_LONG,
                 max_retries=1,
-                retry_on_binance_1021=False,
             )
             r.raise_for_status()
-            rows = r.json() or []
-            if not isinstance(rows, list) or not rows:
-                break
-            # Toplamı ekle; bir sonraki sayfa için zaman imlecini güncelle
-            last_time = cursor
+            data = r.json() or {}
+            result = data.get("result") if isinstance(data, dict) else None
+            rows = result.get("list") if isinstance(result, dict) else None
+            items = rows if isinstance(rows, list) else []
 
-            for it in rows:
+            for it in items:
                 try:
-                    # Sadece REALIZED_PNL; diğer income türlerini dahil etmiyoruz
-                    if str(it.get("incomeType", "")).upper() != "REALIZED_PNL":
-                        continue
-                    total += float(it.get("income", 0) or 0)
-                    t = int(it.get("time") or 0)
-                    if t > last_time:
-                        last_time = t
-                except (TypeError, ValueError, KeyError):
+                    total += float(it.get("closedPnl") or 0.0)
+                except (TypeError, ValueError):
                     continue
 
-            # Sayfalama: bir sonraki sorgu, son kaydın +1 ms'inden
-            # (Binance aynı ms'teki kayıtları tekrar döndürmesin diye)
-            if last_time <= cursor:
+            # sayfalama
+            next_cursor = (
+                result.get("nextPageCursor") if isinstance(result, dict) else None
+            )
+            if not next_cursor or not items:
                 break
-            cursor = last_time + 1
+            cursor = str(next_cursor)
+
     return float(total)
 
 
@@ -404,27 +440,26 @@ async def get_close_price_from_usertrades(
     Döner: {"success": True, "price": float, "time": int, "fills": int, "qty": float}
            bulunamazsa {"success": False, "message": "..."}
     """
-    url = BASE_URL + ENDPOINTS["USER_TRADES"]
-    sym = _normalize_symbol(symbol)
-    want_side = "SELL" if (side or "").lower() == "long" else "BUY"
-    want_pos_side = "LONG" if (side or "").lower() == "long" else "SHORT"
-
-    # opened_at → epoch ms (60 sn güvenlik tamponu). Bunu ÖNCE hesapla.
+    # Bybit V5: /v5/execution/list — kapanışı oluşturan karşı yön fill’lerden VWAP
     try:
-        start_ms = _to_ms(opened_at)
-    except (TypeError, ValueError) as e:
-        return {"success": False, "message": f"invalid opened_at: {e}"}
-    start_ms = max(0, int(start_ms) - int(USERTRADES_LOOKBACK_MS))
+        sym = _normalize_symbol(symbol)
+        want_side = "Sell" if (side or "").strip().lower() == "long" else "Buy"
 
-    params = {
-        "symbol": sym,
-        "limit": limit,
-        "startTime": int(start_ms),
-    }
+        # opened_at → epoch ms (küçük güvenlik tamponu)
+        start_ms = max(0, _to_ms(opened_at) - 60_000)
 
-    full_url, headers = await build_signed_get(url, params, recv_window=RECV_WINDOW_MS)
-    # rows'u iç blokta doldurup hemen kullanıyoruz (IDE false-positive'lerini kapatmak için)
-    try:
+        url = BASE_URL + "/v5/execution/list"
+        params: Dict[str, Any] = {
+            "category": "linear",
+            "symbol": sym,
+            "startTime": start_ms,
+            "limit": int(limit),
+            # Not: order, cursor vb. gerekirse eklenir; tek sayfa genelde yeterli
+        }
+        full_url, headers = await build_signed_get(
+            url, params, recv_window=RECV_WINDOW_MS
+        )
+
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_LONG) as c:
             r = await arequest_with_retry(
                 c,
@@ -433,10 +468,48 @@ async def get_close_price_from_usertrades(
                 headers=headers,
                 timeout=HTTP_TIMEOUT_LONG,
                 max_retries=1,
-                retry_on_binance_1021=False,
             )
             r.raise_for_status()
-            rows = r.json() or []
+            data = r.json() or {}
+
+        # Yanıt: {"result":{"list":[{ "side":"Buy|Sell","execPrice":"..","execQty":"..","execTime":"..", ...}]}}
+        result = data.get("result") if isinstance(data, dict) else None
+        rows = result.get("list") if isinstance(result, dict) else None
+        execs = rows if isinstance(rows, list) else []
+
+        fills = []
+        qty_sum = 0.0
+        notional = 0.0
+        last_t = None
+
+        for it in execs:
+            try:
+                if str(it.get("side") or "") != want_side:
+                    continue
+                p = float(it.get("execPrice") or 0.0)
+                q = float(it.get("execQty") or 0.0)
+                t = int(it.get("execTime") or 0)
+            except (TypeError, ValueError):
+                continue
+            if p <= 0.0 or q <= 0.0:
+                continue
+            fills.append((p, q, t))
+            notional += p * q
+            qty_sum += q
+            last_t = t if (last_t is None or t > last_t) else last_t
+
+        if qty_sum <= 0.0:
+            return {"success": False, "message": "no closing fills found"}
+
+        vwap = notional / qty_sum
+        return {
+            "success": True,
+            "price": float(vwap),
+            "time": int(last_t or 0),
+            "fills": len(fills),
+            "qty": float(qty_sum),
+        }
+
     except httpx.HTTPStatusError as e:
         return {
             "success": False,
@@ -444,51 +517,3 @@ async def get_close_price_from_usertrades(
         }
     except (httpx.RequestError, asyncio.TimeoutError, ValueError, TypeError) as e:
         return {"success": False, "message": str(e)}
-
-    # Kapanışı yapan fill'leri sırayla topla ve VWAP hesapla
-    fills = []
-    qty_sum = 0.0
-    notional = 0.0
-    last_t = None
-
-    for it in rows:
-        s = str(it.get("side", "")).upper()
-        ps = str(it.get("positionSide", "")).upper()
-        if POSITION_MODE == "hedge":
-            if s != want_side or ps != want_pos_side:
-                continue
-        else:
-            if s != want_side:
-                continue
-        try:
-            p = float(it.get("price") or 0.0)
-            q = float(it.get("qty") or 0.0)
-            t = int(it.get("time") or 0)
-        except (ValueError, TypeError):
-            continue
-        if p <= 0 or q <= 0:
-            continue
-        fills.append((p, q, t))
-        notional += p * q
-        qty_sum += q
-        last_t = t
-
-    if qty_sum <= 0:
-        return {"success": False, "message": "no closing fills found"}
-
-    vwap = notional / qty_sum
-
-    # Fiyatı exchange tick'e göre quantize et (uyum için)
-    try:
-        qprice = await quantize_price(sym, vwap)
-    except (ValueError, TypeError, KeyError, asyncio.TimeoutError, httpx.HTTPError):
-        # quantize başarısızsa (tip hatası / cache / ağ) → raw VWAP'a düş
-        qprice = float(vwap)
-
-    return {
-        "success": True,
-        "price": float(qprice),
-        "time": int(last_t or 0),
-        "fills": len(fills),
-        "qty": float(qty_sum),
-    }

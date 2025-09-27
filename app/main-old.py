@@ -8,13 +8,10 @@ import logging.config
 import os
 import sys
 import time
-import uuid
-import contextvars
 
 from app.utils.exchange_validator import validate_all
 from app.config import settings
-from fastapi import FastAPI, Request
-from contextlib import asynccontextmanager
+from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from starlette.middleware.sessions import SessionMiddleware
@@ -39,13 +36,12 @@ from app.routers import account
 from app.services.referral_maintenance import cleanup_expired_reserved
 from app.services.unrealized_sync import sync_unrealized_for_execution
 
+
 if sys.version_info < (3, 9):
-    sys.exit(f"This app requires Python 3.9+. Found: {sys.version.split()[0]}")
+    sys.exit(f"Bu uygulama Python 3.9+ gerektirir. Bulundu: {sys.version.split()[0]}")
 
-# Global correlation id (rid) için contextvar
-RID_CVAR: "contextvars.ContextVar[str]" = contextvars.ContextVar("rid", default="-")
-
-# Logger ayarları (dictConfig içinde filter kullanacağız)
+# Logger ayarları
+logging.basicConfig(level=logging.INFO)
 verifier_logger = logging.getLogger("verifier")
 
 
@@ -72,14 +68,6 @@ app.include_router(account.page_router)
 app.include_router(account.router)
 
 
-class RequestIdFilter(logging.Filter):
-    """Her log kaydına rid alanını enjekte eder (yoksa '-')."""
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        record.rid = RID_CVAR.get()
-        return True
-
-
 def setup_logging():
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
     sqla_echo = os.getenv("SQLA_ECHO", "0") == "1"
@@ -91,10 +79,7 @@ def setup_logging():
             "version": 1,
             "disable_existing_loggers": False,
             "formatters": {
-                # Tek tip format: timestamp level logger [rid] message
-                "std": {
-                    "format": "%(asctime)s %(levelname)s:%(name)s [rid=%(rid)s] %(message)s"
-                }
+                "std": {"format": "%(asctime)s %(levelname)s:%(name)s:%(message)s"}
             },
             "handlers": {
                 "console": {"class": "logging.StreamHandler", "formatter": "std"}
@@ -109,11 +94,6 @@ def setup_logging():
             },
         }
     )
-    _rid_filter = RequestIdFilter()
-    root = logging.getLogger()
-    for h in root.handlers:
-        h.addFilter(_rid_filter)
-    logging.getLogger("verifier").addFilter(_rid_filter)
 
 
 setup_logging()
@@ -123,21 +103,6 @@ setup_logging()
 @app.get("/api/health", tags=["Health"])
 async def health():
     return {"status": "alive", "version": "1.0.0"}
-
-
-# Basit Request-ID middleware: her isteğe kısa bir rid üret, log’lara ve header’a yaz
-@app.middleware("http")
-async def request_id_middleware(request: Request, call_next):
-    # Header'da geldiyse onu kullan, yoksa üret
-    incoming = request.headers.get("X-Request-ID", "").strip()
-    rid = incoming if incoming else uuid.uuid4().hex[:8]
-    token = RID_CVAR.set(rid)
-    try:
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = rid
-        return response
-    finally:
-        RID_CVAR.reset(token)
 
 
 @app.get("/favicon.ico", include_in_schema=False)
@@ -167,7 +132,7 @@ def _verifier_exchanges() -> List[str]:
 
 async def verifier_iteration(db, exchange_name: str) -> None:
     try:
-        verifier_logger.info("→ Checking pending trades for %s", exchange_name)
+        verifier_logger.info(f"→ Checking pending trades for {exchange_name}")
         execution = load_execution_module(exchange_name)
         await verify_pending_trades_for_execution(db, execution)
         await verify_closed_trades_for_execution(db, execution)
@@ -176,13 +141,11 @@ async def verifier_iteration(db, exchange_name: str) -> None:
         try:
             n = await sync_unrealized_for_execution(db, exchange_name)
             verifier_logger.info(f"[uPnL] {exchange_name}: updated={n}")
-        except Exception as exc:  # noqa: BLE001
-            verifier_logger.exception("[uPnL] %s: sync error: %s", exchange_name, exc)
+        except Exception as exc:
+            verifier_logger.exception(f"[uPnL] {exchange_name}: senkron hatası: {exc}")
 
-    except Exception as e:  # noqa: BLE001
-        verifier_logger.error(
-            "Verifier error for %s: %s", exchange_name, e, exc_info=True
-        )
+    except Exception as e:
+        verifier_logger.error(f"Verifier error for {exchange_name}: {e}", exc_info=True)
 
 
 async def verifier_loop(poll_interval: int = 5, cleanup_interval_sec: int = 10 * 60):
@@ -192,10 +155,7 @@ async def verifier_loop(poll_interval: int = 5, cleanup_interval_sec: int = 10 *
     last_cleanup_ts = 0.0
 
     while True:
-        _token = None  # verifier iteration'a özel RID token'ı
         try:
-            # Her iterasyona özel bir rid üretelim; bu iterasyondaki tüm loglar gruplanır
-            _token = RID_CVAR.set(f"vf-{uuid.uuid4().hex[:8]}")
             verifier_logger.info("֍ verifier_loop iteration start")
 
             # 1) Trade doğrulama — kendi session'unda
@@ -214,9 +174,8 @@ async def verifier_loop(poll_interval: int = 5, cleanup_interval_sec: int = 10 *
                         verifier_logger.info(
                             "Referral expiry cleanup: %s rows cleared", n
                         )
-                except Exception as exc:  # noqa: BLE001
+                except Exception as exc:
                     verifier_logger.exception("Referral expiry cleanup error: %s", exc)
-
                 last_cleanup_ts = now_ts
 
             await asyncio.sleep(poll_interval)
@@ -225,19 +184,13 @@ async def verifier_loop(poll_interval: int = 5, cleanup_interval_sec: int = 10 *
             break
         finally:
             verifier_logger.info("֍ verifier_loop iteration end")
-            if _token is not None:
-                try:
-                    RID_CVAR.reset(_token)
-                except Exception:  # noqa: BLE001
-                    pass
 
     verifier_logger.info("Verifier loop terminated.")
 
 
-@asynccontextmanager
-async def lifespan(app_: FastAPI):
-    # ==== STARTUP ====
-    app_.state.verifier_task = asyncio.create_task(  # type: ignore[attr-defined]
+@app.on_event("startup")
+async def startup_event():
+    app.state.verifier_task = asyncio.create_task(  # type: ignore[attr-defined]
         verifier_loop(poll_interval=settings.VERIFY_INTERVAL_SECONDS)
     )
     try:
@@ -245,10 +198,9 @@ async def lifespan(app_: FastAPI):
             "Verifier exchanges (effective): %s",
             ", ".join(_verifier_exchanges()) or "∅",
         )
-    except Exception:  # noqa: BLE001
+    except Exception:
         pass
 
-    # Borsa sözleşmesi doğrulama (log’a yaz; istersen raise’a çevir)
     active_csv = getattr(settings, "ACTIVE_EXCHANGES", "")
     active = [x.strip() for x in active_csv.split(",") if x.strip()]
     issues = validate_all(active)
@@ -256,25 +208,24 @@ async def lifespan(app_: FastAPI):
         msgs = []
         for ex, errs in issues:
             msgs.append(f"\n- {ex}:\n  - " + "\n  - ".join(errs))
+        # Tercihinize göre: raise veya sadece log
+        # raise RuntimeError("Exchange contract violations:" + "".join(msgs))
+        import logging
+
         logging.getLogger("contract").error(
             "Exchange contract violations:%s", "".join(msgs)
         )
 
-    # Uygulama request kabul etmeye burada başlar
-    yield
 
-    # ==== SHUTDOWN ====
-    task = getattr(app_.state, "verifier_task", None)  # type: ignore[attr-defined]
+@app.on_event("shutdown")
+async def shutdown_event():
+    task = getattr(app.state, "verifier_task", None)  # type: ignore[attr-defined]
     if task:
         task.cancel()
         try:
             await task
         except asyncio.CancelledError:
             verifier_logger.info("Verifier task cancelled.")
-
-
-# Lifespan’ı FastAPI’ye tanıt
-app.router.lifespan_context = lifespan  # type: ignore[attr-defined]
 
 
 if __name__ == "__main__":

@@ -90,6 +90,8 @@ def patch_trade_sql(monkeypatch):
             return self
 
     monkeypatch.setattr(trade_module, "select", lambda *a, **k: DummySelect())
+    # SQLAlchemy and_(...) yerine no-op bir stub kullan
+    monkeypatch.setattr(trade_module, "and_", lambda *a, **k: object())
     monkeypatch.setattr(trade_module, "text", lambda *a, **k: None)
     # close_open_trade_and_record içinde çağrılan sqlalchemy.update(...)’i de stub’la
     monkeypatch.setattr(trade_module, "update", lambda *a, **k: DummyUpdate())

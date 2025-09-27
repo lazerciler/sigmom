@@ -15,6 +15,8 @@ def load_execution_module(exchange: str):
         from app.exchanges.binance_futures_testnet import sync, order_handler
     elif exchange == "binance_futures_mainnet":
         from app.exchanges.binance_futures_mainnet import sync, order_handler
+    elif exchange == "bybit_futures_testnet":
+        from app.exchanges.bybit_futures_testnet import sync, order_handler
     else:
         raise ValueError(f"Exchange not supported: {exchange}")
 

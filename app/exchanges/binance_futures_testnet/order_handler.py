@@ -4,102 +4,83 @@
 
 import logging
 import httpx
-import time
-from urllib.parse import urlencode
-from app.models import StrategyOpenTrade
 import uuid
 import asyncio
+
+from app.exchanges.common.http.retry import arequest_with_retry
+from app.models import StrategyOpenTrade
 from typing import Optional, Any
 from app.schemas import WebhookSignal
-from .settings import BASE_URL, ENDPOINTS, POSITION_MODE
+from .settings import (
+    BASE_URL,
+    ENDPOINTS,
+    POSITION_MODE,
+    RECV_WINDOW_MS,
+    RECV_WINDOW_LONG_MS,
+    HTTP_TIMEOUT_SHORT,
+    HTTP_TIMEOUT_LONG,
+)
 from .utils import (
-    sign_payload,
-    get_signed_headers,
-    get_binance_server_time,
+    build_signed_get,
+    build_signed_post,
     adjust_quantity,
     set_leverage as _utils_set_leverage,
     get_position_mode,
     set_position_mode,
 )
-
-# _mode_checked_event = asyncio.Event()
-_mode_checked_event = asyncio.Event()
-# ---- SAFETY HOLD (in-memory) ----
-_HOLD_UNTIL = 0.0
-_HOLD_REASON = ""
-_MODE_READ_RETRY = 3
-_MODE_READ_DELAY = 1.0
-_HOLD_SECONDS = 300  # 5 dk
-
-
-def is_safety_hold() -> tuple[bool, str]:
-    return (time.time() < _HOLD_UNTIL), _HOLD_REASON
-
-
-def _start_hold(reason: str) -> None:
-    global _HOLD_UNTIL, _HOLD_REASON
-    _HOLD_UNTIL = time.time() + _HOLD_SECONDS
-    _HOLD_REASON = reason
-    logger.error("SAFETY HOLD %ss: %s", _HOLD_SECONDS, reason)
-
+from app.exchanges.common.safety import SafetyGate
 
 logger = logging.getLogger(__name__)
+
+_GATE = SafetyGate(
+    position_mode_expected=POSITION_MODE,
+    get_mode=get_position_mode,
+    set_mode=set_position_mode,
+)
+# Yalnızca dışa açmak istediğimiz semboller
+__all__ = [
+    "set_leverage",
+    "build_open_trade_model",
+    "place_order",
+    "get_position",
+    "query_order_status",
+    "income_breakdown",  # dağılım/kalem kalem gelir
+]
+
+
+def _build_param_rules(position_mode: str, mode: str, side_in: str):
+    """
+    Saf kural fonksiyonu:
+      - one_way + close  → reduceOnly=true, positionSide=None, side=ters
+      - hedge   + open   → reduceOnly yok, positionSide=LONG/SHORT, side=doğru
+      - hedge   + close  → reduceOnly yok, positionSide=LONG/SHORT, side=ters
+      - one_way + open   → reduceOnly yok, positionSide=None, side=doğru
+    Dönen değerler: (reduce_only: bool, position_side: str|None, api_side: 'BUY'|'SELL')
+    """
+    pm = (position_mode or "").lower()
+    md = (mode or "").lower()
+    sd = (side_in or "").lower()
+
+    reduce_only = md == "close" and pm != "hedge"
+    if md == "close":
+        api_side = "SELL" if sd == "long" else "BUY"
+    else:
+        api_side = "BUY" if sd == "long" else "SELL"
+
+    position_side = None
+    if pm == "hedge":
+        position_side = "LONG" if sd == "long" else "SHORT"
+
+    return reduce_only, position_side, api_side
 
 
 async def set_leverage(symbol: str, leverage: int) -> dict:
     return await _utils_set_leverage(symbol, leverage)
 
 
-async def _ensure_position_mode_once():
-    if _mode_checked_event.is_set():
-        return
-
-    success = False
-    try:
-        # 1) Modu birkaç kez dene
-        last_err = ""
-        chk = None
-        for _ in range(_MODE_READ_RETRY):
-            chk = await get_position_mode()
-            if chk.get("success"):
-                break
-            last_err = str(chk.get("message") or "mode_read_failed")
-            await asyncio.sleep(_MODE_READ_DELAY)
-
-        # 1b) hâlâ yoksa → HOLD aç ve çık
-        if not (chk and chk.get("success")):
-            logger.warning("Position mode read failed (retry exhausted): %s", last_err)
-            _start_hold(
-                "Uncertain trading mode: unable to read mode information from exchange"
-            )
-            success = True  # bu süreçte tekrar denemesin diye event'i set edeceğiz
-            return
-
-        # 2) mevcut mod vs config
-        actual = chk.get("mode")
-        logger.info(
-            "Position mode check → exchange=%s, config=%s", actual, POSITION_MODE
-        )
-
-        if actual != POSITION_MODE:
-            logger.warning("Position mode mismatch → trying autoswitch.")
-            sw = await set_position_mode(POSITION_MODE)
-            if not sw.get("success"):
-                logger.warning("Position mode autoswitch failed: %s", sw.get("message"))
-                _start_hold("Belirsiz işlem modu: borsa modu config ile uyumsuz")
-                success = True
-                return
-            logger.info("Position mode switched to %s", POSITION_MODE)
-            success = True
-            return
-
-        # 3) zaten uyumlu
-        success = True
-        return
-
-    finally:
-        if success:
-            _mode_checked_event.set()
+# Geriye dönük isimler (kullanan kod varsa bozulmasın)
+is_safety_hold = _GATE.is_blocked  # type: ignore
+_ensure_position_mode_once = _GATE.ensure_position_mode_once  # type: ignore
 
 
 def build_open_trade_model(
@@ -126,16 +107,15 @@ async def place_order(
     signal_data: WebhookSignal, client_order_id: Optional[str] = None
 ) -> dict:
     # Hesap modunu süreçte bir kez doğrula/ayarla (async-safe)
-
     # Hold aktifse hiç deneme
-    blocked, reason = is_safety_hold()
+    blocked, reason = _GATE.is_blocked()
     if blocked:
         return {"success": False, "message": "SAFETY_HOLD: " + reason, "data": {}}
 
     # Hesap modunu süreçte bir kez doğrula/ayarla (async-safe)
-    await _ensure_position_mode_once()
+    await _GATE.ensure_position_mode_once()
     # ensure sonrası tekrar bak (bu sırada hold açılmış olabilir)
-    blocked, reason = is_safety_hold()
+    blocked, reason = _GATE.is_blocked()
     if blocked:
         return {"success": False, "message": "SAFETY_HOLD: " + reason, "data": {}}
 
@@ -148,44 +128,59 @@ async def place_order(
     symbol = signal_data.symbol.upper()
     order_type = "MARKET"
     quantity = await adjust_quantity(symbol, signal_data.position_size)
-    mode = (signal_data.mode or "").lower()
-    side_in = (signal_data.side or "").lower()
-    # One-Way:  CLOSE ⇒ ters yön + reduceOnly
-    # Hedge:    CLOSE ⇒ ters yön (reduceOnly YOK; Binance reddeder)
-    if mode == "close":
-        api_side = "SELL" if side_in == "long" else "BUY"
-        reduce_only = POSITION_MODE != "hedge"
-    else:
-        api_side = "BUY" if side_in == "long" else "SELL"
-        reduce_only = False
-    server_time = await get_binance_server_time()
+    mode = signal_data.mode or ""
+    side_in = signal_data.side or ""
+    reduce_only, position_side, api_side = _build_param_rules(
+        POSITION_MODE, mode, side_in
+    )
+
     params: dict[str, Any] = {
         "symbol": symbol,
         "side": api_side,
         "type": order_type,
         "quantity": quantity,
-        "timestamp": server_time,
-        "recvWindow": 5000,
     }
-    if reduce_only and POSITION_MODE != "hedge":
+
+    if reduce_only:
         params["reduceOnly"] = "true"
-    if POSITION_MODE == "hedge":
-        params["positionSide"] = "LONG" if side_in == "long" else "SHORT"
+
+    if position_side is not None:
+        params["positionSide"] = position_side
         # Emniyet: Hedge modda reduceOnly asla gönderilmemeli
         params.pop("reduceOnly", None)
 
+    # clientOrderId opsiyonel → yoksa servis tarafında üret (idempotency için faydalı)
     if client_order_id:
         params["newClientOrderId"] = client_order_id
+    else:
+        params["newClientOrderId"] = f"svc-{uuid.uuid4().hex[:8]}"
+    full_url, headers = await build_signed_post(url, params, recv_window=RECV_WINDOW_MS)
 
-    query_string = urlencode(sorted((k, str(v)) for k, v in params.items()))
-    signature = sign_payload(params)
-    full_query = f"{query_string}&signature={signature}"
-    headers = get_signed_headers()
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.post(f"{url}?{full_query}", headers=headers)
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SHORT) as client:
+            response = await arequest_with_retry(
+                client,
+                "POST",
+                full_url,
+                headers=headers,
+                timeout=HTTP_TIMEOUT_SHORT,
+                max_retries=1,
+                retry_on_binance_1021=True,
+                # -1021 olursa taze ts/imza ile yeniden POST hazırla
+                rebuild_async=lambda: build_signed_post(
+                    url, params, recv_window=RECV_WINDOW_LONG_MS
+                ),
+            )
             response.raise_for_status()
-            return {"success": True, "data": response.json()}
+            data = response.json()
+            # Üst katman sorgulamak isterse kimlikleri net döndür
+            return {
+                "success": True,
+                "data": data,
+                "orderId": data.get("orderId"),
+                "clientOrderId": data.get("clientOrderId")
+                or params.get("newClientOrderId"),
+            }
     except httpx.HTTPStatusError as exc:
         logger.error(
             "Binance API Error %s: %s", exc.response.status_code, exc.response.text
@@ -198,23 +193,30 @@ async def place_order(
 
 async def get_position(symbol: str, side: Optional[str] = None) -> dict:
     """Binance Futures pozisyon bilgilerini alır."""
-    logger.debug("📡 get_position() → %s", symbol)
+    logger.debug("get_position() → %s", symbol)
     endpoint = ENDPOINTS["POSITION_RISK"]
     url = BASE_URL + endpoint
     sym = (symbol or "").upper()
-    server_time = await get_binance_server_time()
+
     params: dict[str, Any] = {
         "symbol": sym,
-        "timestamp": server_time,
-        "recvWindow": 5000,
     }
-    query_string = urlencode(sorted((k, str(v)) for k, v in params.items()))
-    signature = sign_payload(params)
-    full_query = f"{query_string}&signature={signature}"
-    headers = get_signed_headers()
+
+    full_url, headers = await build_signed_get(url, params, recv_window=RECV_WINDOW_MS)
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(f"{url}?{full_query}", headers=headers)
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SHORT) as client:
+            response = await arequest_with_retry(
+                client,
+                "GET",
+                full_url,
+                headers=headers,
+                timeout=HTTP_TIMEOUT_SHORT,
+                max_retries=1,
+                retry_on_binance_1021=True,
+                rebuild_async=lambda: build_signed_get(
+                    url, params, recv_window=RECV_WINDOW_LONG_MS
+                ),
+            )
             response.raise_for_status()
             data = response.json()
     except httpx.HTTPStatusError as exc:
@@ -253,37 +255,58 @@ async def get_position(symbol: str, side: Optional[str] = None) -> dict:
     return {}
 
 
-async def query_order_status(symbol: str, order_id: str) -> dict:
+async def query_order_status(
+    symbol: str,
+    order_id: Optional[str] = None,
+    client_order_id: Optional[str] = None,
+) -> dict:
     """Binance Futures'ta bir order'ın durumunu kontrol eder."""
     try:
         endpoint = ENDPOINTS["ORDER"]
         url = BASE_URL + endpoint
-        server_time = await get_binance_server_time()
-        params: dict[str, Any] = {
-            "symbol": (symbol or "").upper(),
-            "orderId": order_id,
-            "timestamp": server_time,
-            "recvWindow": 5000,
-        }
-        query_string = urlencode(sorted((k, str(v)) for k, v in params.items()))
-        signature = sign_payload(params)
-        full_query = f"{query_string}&signature={signature}"
-        headers = get_signed_headers()
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            response = await client.get(f"{url}?{full_query}", headers=headers)
+
+        params: dict[str, Any] = {"symbol": (symbol or "").upper()}
+        if order_id:
+            params["orderId"] = order_id
+        elif client_order_id:
+            params["origClientOrderId"] = client_order_id
+        else:
+            return {"success": False, "message": "order_id or client_order_id required"}
+
+        full_url, headers = await build_signed_get(
+            url, params, recv_window=RECV_WINDOW_MS
+        )
+
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SHORT) as client:
+            response = await arequest_with_retry(
+                client,
+                "GET",
+                full_url,
+                headers=headers,
+                timeout=HTTP_TIMEOUT_SHORT,
+                max_retries=1,
+                retry_on_binance_1021=True,
+                rebuild_async=lambda: build_signed_get(
+                    url, params, recv_window=RECV_WINDOW_LONG_MS
+                ),
+            )
             response.raise_for_status()
             data = response.json()
             return {"success": True, "status": data.get("status"), "data": data}
     except httpx.HTTPStatusError as e:
-        # Non-200 yanıtları burada yakalayıp mesajı döndürelim
+        # Non-200 yanıtları burada yakalayıp mesajı döndür
         return {
             "success": False,
             "message": e.response.text,
         }
+    # Ağ hatalarını da yakala
+    except (httpx.RequestError, asyncio.TimeoutError) as e:
+        logger.error("Network error while querying order status: %s", e)
+        return {"success": False, "message": str(e)}
 
 
 # ---------------------- Borsa-onaylı Net PnL (income) ------------------------
-async def income_summary(
+async def income_breakdown(
     start_ms: int,
     end_ms: int,
     symbol: Optional[str] = None,
@@ -297,15 +320,13 @@ async def income_summary(
     """
     endpoint = ENDPOINTS.get("INCOME", "/fapi/v1/income")
     url = BASE_URL + endpoint
-    totals = {}
+    totals: dict[str, float] = {}
     last = int(start_ms)
+
     try:
-        async with httpx.AsyncClient(timeout=15) as c:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_LONG) as c:
             while True:
-                ts = await get_binance_server_time()
                 params: dict[str, Any] = {
-                    "timestamp": ts,
-                    "recvWindow": 5000,
                     "startTime": last,
                     "endTime": int(end_ms),
                     "limit": limit,
@@ -313,16 +334,22 @@ async def income_summary(
                 if symbol:
                     params["symbol"] = (symbol or "").upper()
 
-                q = urlencode(sorted((k, str(v)) for k, v in params.items()))
-                sig = sign_payload(params)
-                r = await c.get(
-                    f"{url}?{q}&signature={sig}", headers=get_signed_headers()
+                full_url, headers = await build_signed_get(
+                    url, params, recv_window=RECV_WINDOW_LONG_MS
+                )
+                r = await arequest_with_retry(
+                    c,
+                    "GET",
+                    full_url,
+                    headers=headers,
+                    timeout=HTTP_TIMEOUT_LONG,
+                    max_retries=1,
+                    retry_on_binance_1021=False,
                 )
                 r.raise_for_status()
                 rows = r.json() or []
                 if not rows:
                     break
-
                 for it in rows:
                     k = str(it.get("incomeType") or "")
                     v = float(it.get("income") or 0.0)
@@ -341,8 +368,21 @@ async def income_summary(
         return {"success": False, "net": 0.0, "sum": {}, "message": str(e)}
 
     net = sum(totals.values())
+
     return {
         "success": True,
         "net": float(net),
         "sum": {k: float(v) for k, v in totals.items()},
     }
+
+
+# Geriye dönük uyumluluk için async alias:
+# (Modül nitelikli çağrılarda kullanılabilir; __all__ içinde olmadığından
+# wildcard import ile dışarı çıkmayacak.)
+async def income_summary(
+    start_ms: int,
+    end_ms: int,
+    symbol: Optional[str] = None,
+    limit: int = 1000,
+) -> dict:
+    return await income_breakdown(start_ms, end_ms, symbol=symbol, limit=limit)

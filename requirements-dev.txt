@@ -7,3 +7,6 @@ cryptography>=40.0.0 # "Self Signed" sertifika oluşturmak için: python scripts
 
 pip install jsbeautifier # .js dosyalarını biçimlendirmek için
 # Örnek kullanım (Proje kökünde): js-beautify -o app/static/js/file-name.js app/static/js/file-name.js
+
+pytest
+pytest-asyncio

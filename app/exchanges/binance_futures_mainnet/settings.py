@@ -1,9 +1,30 @@
 #!/usr/bin/env python3
 # app/exchanges/binance_futures_mainnet/settings.py
 # Python 3.9
+
 from app.config import settings
 
 EXCHANGE_NAME = "binance_futures_mainnet"
+
+HTTP_TIMEOUT_SYNC = (
+    settings.BINANCE_FUTURES_MAINNET_HTTP_TIMEOUT_SYNC or settings.HTTP_TIMEOUT_SYNC
+)
+HTTP_TIMEOUT_SHORT = (
+    settings.BINANCE_FUTURES_MAINNET_HTTP_TIMEOUT_SHORT or settings.HTTP_TIMEOUT_SHORT
+)
+HTTP_TIMEOUT_LONG = (
+    settings.BINANCE_FUTURES_MAINNET_HTTP_TIMEOUT_LONG or settings.HTTP_TIMEOUT_LONG
+)
+
+# RECV_WINDOW_MS = settings.FUTURES_RECV_WINDOW_MS
+# RECV_WINDOW_LONG_MS = settings.FUTURES_RECV_WINDOW_LONG_MS
+RECV_WINDOW_MS = (
+    settings.BINANCE_FUTURES_MAINNET_RECV_WINDOW_MS or settings.FUTURES_RECV_WINDOW_MS
+)
+RECV_WINDOW_LONG_MS = (
+    settings.BINANCE_FUTURES_MAINNET_RECV_WINDOW_LONG_MS
+    or settings.FUTURES_RECV_WINDOW_LONG_MS
+)
 
 API_KEY = getattr(settings, f"{EXCHANGE_NAME.upper()}_API_KEY")
 API_SECRET = getattr(settings, f"{EXCHANGE_NAME.upper()}_API_SECRET")
@@ -12,29 +33,14 @@ BASE_URL = "https://fapi.binance.com"
 POSITION_MODE = "one_way"  # "one_way" or "hedge"
 
 # userTrades aralığı için geriye bakış (ms)
-USERTRADES_LOOKBACK_MS = 120_000  # 60_000 kısa kalabilir bu yüzden 120_000 önerilir.
-# Kısa açıklama: startTime tamponu, /fapi/v1/userTrades sorgusunda başlangıç zamanını açılış timestamp’ından
-# bir miktar geriye çekmemiz.
-# Neden? Exchange ile bizim kayıt saatimiz arasında küçük kaymalar olabilir
-# (sistem saati farkı, ağ gecikmesi, order’ın borsada kayda geçme zamanı vs.).
-# Tampon küçük ise kapanışı yapan fill’leri kaçırabiliriz; biraz büyük yapınca güvenli bölge oluştururuz.
-#
-# Etkisi:
-#
-# Küçük tampon (örn. 0–30 sn): Bazı senaryolarda kapanış fill’i sorgu aralığının dışında kalabilir → fiyat bulunamaz.
-#
-# Orta tampon (örn. 60–180 sn): Güvenlik alanı; kapanış fill’ini neredeyse her zaman yakalar. (Biz 60 sn ile yakaladık.)
-#
-# Çok büyük tampon (örn. dakikalarca): Sorgu daha fazla satır getirir → biraz daha yavaş,
-# API kotasına (rate limit) yaklaşma riski artar.
-# Gereksiz eski işlemler dönebilir ama biz zaten side / positionSide ile filtrelediğimiz için
-# doğruluk bozulmaz; sadece gereksiz veri gelir.
-#
-# Öneri: 120 sn varsayılan gayet iyi. Çok yoğun/ping yüksek ortamlarda 180–300 sn düşünülebilir.
+USERTRADES_LOOKBACK_MS = 120_000  # 60_000 kısa kalabilir bu yüzden 120 önerilir.
 
 KLINES_PATH = "/fapi/v1/klines"
+
 KLINES_PARAMS = {"symbol": "symbol", "interval": "interval", "limit": "limit"}
+
 KLINES_LIMIT_MAX = 1500
+
 TF_MAP = {
     "1m": "1m",
     "3m": "3m",
