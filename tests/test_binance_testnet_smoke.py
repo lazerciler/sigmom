@@ -1,4 +1,5 @@
 # tests/test_binance_testnet_smoke.py
+# Python 3.9
 
 import os
 import time

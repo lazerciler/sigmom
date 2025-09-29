@@ -158,7 +158,13 @@ async def place_order(
 
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SHORT) as client:
-            body = json.dumps(params).encode("utf-8")
+            # body = json.dumps(params).encode("utf-8")
+
+            # Gönderilecek gövdeyi kanonik JSON olarak üret (imza ile birebir)
+            body = json.dumps(params, separators=(",", ":"), ensure_ascii=False).encode(
+                "utf-8"
+            )
+            headers["Content-Type"] = "application/json"
             # 1. deneme
             response = await client.post(
                 full_url, headers=headers, content=body, timeout=HTTP_TIMEOUT_SHORT
@@ -170,7 +176,13 @@ async def place_order(
                 full_url, headers = await build_signed_post(
                     url, params, recv_window=RECV_WINDOW_LONG_MS
                 )
-                body = json.dumps(params).encode("utf-8")
+                # body = json.dumps(params).encode("utf-8")
+
+                # Gövde ve Content-Type aynı kalsın (kanonik JSON)
+                body = json.dumps(
+                    params, separators=(",", ":"), ensure_ascii=False
+                ).encode("utf-8")
+                headers["Content-Type"] = "application/json"
                 response = await client.post(
                     full_url, headers=headers, content=body, timeout=HTTP_TIMEOUT_SHORT
                 )
@@ -318,26 +330,27 @@ async def income_breakdown(
     limit: int = 1000,
 ) -> dict:
     """
-    Binance Futures /fapi/v1/income akışını okuyup tip bazında toplar.
-    Dönen 'net', borsanın verdiği tüm gelir/masraf kalemlerinin toplamıdır:
-      Net = Σ(REALIZED_PNL, COMMISSION, FUNDING_FEE, …)
-    (COMMISSION genelde negatif, FUNDING_FEE pozitif/negatif olabilir.)
+    Bybit V5 /v5/position/closed-pnl akışını okuyup işlem tipi bazında toplar.
+    Dönen 'net', borsanın verdiği tüm kapalı işlem PnL kalemlerinin toplamıdır.
     """
-    endpoint = ENDPOINTS.get("INCOME", "/fapi/v1/income")
+    endpoint = ENDPOINTS["INCOME"]
     url = BASE_URL + endpoint
     totals: dict[str, float] = {}
-    last = int(start_ms)
+    cursor: Optional[str] = None
+    page_limit = max(1, min(int(limit), 200))
 
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_LONG) as c:
             while True:
-                params: dict[str, Any] = {
-                    "startTime": last,
-                    "endTime": int(end_ms),
-                    "limit": limit,
-                }
+                params: dict[str, Any] = {"category": "linear", "limit": page_limit}
+                if start_ms is not None:
+                    params["startTime"] = int(start_ms)
+                if end_ms is not None:
+                    params["endTime"] = int(end_ms)
                 if symbol:
                     params["symbol"] = (symbol or "").upper()
+                if cursor:
+                    params["cursor"] = cursor
 
                 full_url, headers = await build_signed_get(
                     url, params, recv_window=RECV_WINDOW_LONG_MS
@@ -352,19 +365,27 @@ async def income_breakdown(
                     retry_on_binance_1021=False,
                 )
                 r.raise_for_status()
-                rows = r.json() or []
-                if not rows:
+                data = r.json() or {}
+                result = data.get("result") if isinstance(data, dict) else None
+                rows = result.get("list") if isinstance(result, dict) else None
+                items = rows if isinstance(rows, list) else []
+                if not items:
                     break
-                for it in rows:
-                    k = str(it.get("incomeType") or "")
-                    v = float(it.get("income") or 0.0)
-                    totals[k] = totals.get(k, 0.0) + v
-                    t = int(it.get("time") or 0)
-                    if t > last:
-                        last = t
-                if len(rows) < limit:
+                for it in items:
+                    try:
+                        closed_pnl = float(it.get("closedPnl") or 0.0)
+                    except (TypeError, ValueError):
+                        closed_pnl = 0.0
+                    exec_type = it.get("execType") or it.get("category") or "UNKNOWN"
+                    key = str(exec_type)
+                    totals[key] = totals.get(key, 0.0) + closed_pnl
+
+                next_cursor = (
+                    result.get("nextPageCursor") if isinstance(result, dict) else None
+                )
+                if not next_cursor:
                     break
-                last += 1  # bir sonraki sayfa
+                cursor = str(next_cursor)
     except httpx.HTTPStatusError as e:
         logger.exception("income_summary HTTP error: %s", e)
         return {"success": False, "net": 0.0, "sum": {}, "message": str(e)}

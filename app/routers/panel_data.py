@@ -609,62 +609,89 @@ def _normalize_upnl(raw: Any) -> Tuple[Decimal, Decimal, Decimal]:
     return _to_dec(raw), long_amt, short_amt
 
 
+# @router.get("/unrealized")
+# async def me_unrealized(
+#     exchange: str = Query(settings.DEFAULT_EXCHANGE),
+#     symbol: Optional[str] = Query(None),
+#     return_all: bool = Query(
+#         False,
+#         alias="all",
+#         description="Ham çıktıyı döndür (debug). Varsayılan: normalize + legs breakdown.",
+#     ),
+# ):
+#     """
+#     Döndürür:
+#       {
+#         "unrealized": <float>,                 # toplam (L+S)
+#         "legs": {"long": <float>, "short": <float>},
+#         "mode": "one_way" | "hedge"
+#       }
+#     ?all=1 verilirse borsa modülünün ham çıktısı aynen döner.
+#     """
+#     try:
+#         mod = importlib.import_module(f"app.exchanges.{exchange}.account")
+#         fn = getattr(mod, "get_unrealized", None)
+#         if not callable(fn):
+#             raise RuntimeError(f"{exchange}.account içinde get_unrealized(...) yok")
+#
+#         if inspect.iscoroutinefunction(fn):
+#             raw = await fn(symbol=symbol, return_all=return_all)
+#         else:
+#             raw = fn(symbol=symbol, return_all=return_all)
+#
+#         if return_all:
+#             return raw
+#
+#         total, long_amt, short_amt = _normalize_upnl(raw)
+#         # moddan pozisyon modu (varsa) oku; yoksa varsayılan
+#         try:
+#             ex = load_execution_module(exchange)
+#             mode = getattr(
+#                 getattr(ex, "order_handler", None), "POSITION_MODE", "one_way"
+#             )
+#         # except Exception:
+#         except (ImportError, AttributeError):
+#             mode = "one_way" if (short_amt == 0) else "hedge"  # kaba tahmin
+#
+#         # one_way/BOTH: legs 0 ise toplamı LONG'a yaz
+#         if str(mode) == "one_way" and long_amt == 0 and short_amt == 0 and total != 0:
+#             long_amt = total
+#
+#         return {
+#             "unrealized": float(total),
+#             "legs": {"long": float(long_amt), "short": float(short_amt)},
+#             "mode": mode,
+#         }
+#
+#     # except Exception as e:
+#     #     raise HTTPException(status_code=400, detail=str(e))
+#     except Exception:
+#         # UI'yi düşürmeyelim: güvenli sıfırlar döndür.
+#         # (Hata / credential eksikliği vb. durumlarda kartlar boş olsa da panel akmaya devam eder)
+#         return {
+#             "unrealized": 0.0,
+#             "legs": {"long": 0.0, "short": 0.0},
+#             "mode": "one_way",
+#         }
+
+
 @router.get("/unrealized")
 async def me_unrealized(
     exchange: str = Query(settings.DEFAULT_EXCHANGE),
-    symbol: Optional[str] = Query(None),
-    return_all: bool = Query(
-        False,
-        alias="all",
-        description="Ham çıktıyı döndür (debug). Varsayılan: normalize + legs breakdown.",
-    ),
+    symbol: str = Query(..., description="örn. BTCUSDT"),
+    return_all: bool = Query(False, description="toplam mı döndürsün"),
 ):
-    """
-    Döndürür:
-      {
-        "unrealized": <float>,                 # toplam (L+S)
-        "legs": {"long": <float>, "short": <float>},
-        "mode": "one_way" | "hedge"
-      }
-    ?all=1 verilirse borsa modülünün ham çıktısı aynen döner.
-    """
     try:
-        mod = importlib.import_module(f"app.exchanges.{exchange}.account")
-        fn = getattr(mod, "get_unrealized", None)
-        if not callable(fn):
-            raise RuntimeError(f"{exchange}.account içinde get_unrealized(...) yok")
-
-        if inspect.iscoroutinefunction(fn):
-            raw = await fn(symbol=symbol, return_all=return_all)
-        else:
-            raw = fn(symbol=symbol, return_all=return_all)
-
-        if return_all:
-            return raw
-
-        total, long_amt, short_amt = _normalize_upnl(raw)
-        # moddan pozisyon modu (varsa) oku; yoksa varsayılan
-        try:
-            ex = load_execution_module(exchange)
-            mode = getattr(
-                getattr(ex, "order_handler", None), "POSITION_MODE", "one_way"
-            )
-        # except Exception:
-        except (ImportError, AttributeError):
-            mode = "one_way" if (short_amt == 0) else "hedge"  # kaba tahmin
-
-        # one_way/BOTH: legs 0 ise toplamı LONG’a yaz
-        if str(mode) == "one_way" and long_amt == 0 and short_amt == 0 and total != 0:
-            long_amt = total
-
+        ex = load_execution_module(exchange)
+        out = await ex.account.get_unrealized(symbol=symbol, return_all=return_all)
+        return out
+    except Exception:
+        # UI’yi düşürmeyelim: güvenli sıfırlar döndür.
         return {
-            "unrealized": float(total),
-            "legs": {"long": float(long_amt), "short": float(short_amt)},
-            "mode": mode,
+            "unrealized": 0.0,
+            "legs": {"long": 0.0, "short": 0.0},
+            "mode": "one_way",
         }
-
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
 
 
 # ------------------------- Net PnL (borsa-onaylı) ---------------------------
@@ -676,6 +703,8 @@ async def me_unrealized(
 #     since_epoch: Optional[int] = Query(None, description="Unix saniye"),
 #     db: AsyncSession = Depends(get_db),
 # ):
+
+
 @router.get("/netpnl")
 async def me_netpnl(
     exchange: str = Query(settings.DEFAULT_EXCHANGE),

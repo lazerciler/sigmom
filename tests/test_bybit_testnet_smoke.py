@@ -1,4 +1,5 @@
 # tests/test_bybit_testnet_smoke.py
+# Python 3.9
 
 import json
 import httpx

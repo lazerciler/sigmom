@@ -1,11 +1,14 @@
-# Python 3.9
 # tests/test_trade_close.py
+# Python 3.9
+
 import sys
 import types
 import asyncio
 import logging
 from types import SimpleNamespace
 from decimal import Decimal
+
+# noinspection PyPackageRequirements
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 

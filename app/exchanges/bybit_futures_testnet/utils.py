@@ -3,13 +3,14 @@
 # Python 3.9
 
 import logging
+from copy import deepcopy
 import httpx
 import asyncio
 import json
 from urllib.parse import urlencode
 
 from typing import Optional, Tuple, Dict
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal, ROUND_DOWN, InvalidOperation
 from time import time as _time
 from .settings import (
     API_KEY,
@@ -52,13 +53,29 @@ def _get_server_time_sync() -> int:
             r = c.get(f"{BASE_URL}{ENDPOINTS['SERVER_TIME']}")
             r.raise_for_status()
             j = r.json()
-            # Bybit V5 farklı alanlar döndürebilir: result.timeNano | result.timeSecond | time
-            st = (
-                (j.get("result") or {}).get("timeNano")
-                or (j.get("result") or {}).get("timeSecond")
-                or j.get("time")
-            )
-            return int(st) if st is not None else int(_time() * 1000)
+            direct_time = j.get("time")
+            if direct_time is not None:
+                try:
+                    return int(Decimal(str(direct_time)))
+                except (InvalidOperation, ValueError, TypeError):
+                    pass
+
+            result = j.get("result") or {}
+            nano = result.get("timeNano")
+            if nano is not None:
+                try:
+                    return int(Decimal(str(nano)) / Decimal("1e6"))
+                except (InvalidOperation, ValueError, TypeError):
+                    pass
+
+            seconds = result.get("timeSecond")
+            if seconds is not None:
+                try:
+                    return int(Decimal(str(seconds)) * Decimal("1e3"))
+                except (InvalidOperation, ValueError, TypeError):
+                    pass
+
+            return int(_time() * 1000)
     except (httpx.RequestError, httpx.HTTPStatusError, ValueError, TypeError, KeyError):
         return int(_time() * 1000)
 
@@ -85,6 +102,16 @@ async def build_signed_get(
     if not endpoint.startswith("/"):
         endpoint = "/" + endpoint
     full_url, headers = _HTTP.build_get(endpoint, params or {}, window)
+    # --- GET isteklerinde Content-Type imzayı bozmasın ---
+    headers.pop("Content-Type", None)
+    # --- BYBIT V5 HEADER GUARANTEES ---
+    if "X-BAPI-SIGN-TYPE" not in headers:
+        headers["X-BAPI-SIGN-TYPE"] = "2"
+    rv = headers.get("X-BAPI-RECV-WINDOW")
+    if rv is not None and not isinstance(rv, str):
+        headers["X-BAPI-RECV-WINDOW"] = str(rv)
+    # İçerik müzakeresi için açık kabul tipi
+    headers.setdefault("Accept", "application/json")
     return full_url, headers
 
 
@@ -100,39 +127,130 @@ async def build_signed_post(
     if not endpoint.startswith("/"):
         endpoint = "/" + endpoint
     full_url, headers = _HTTP.build_post(endpoint, params or {}, window)
+    # --- BYBIT V5 HEADER GUARANTEES ---
+    if "X-BAPI-SIGN-TYPE" not in headers:
+        headers["X-BAPI-SIGN-TYPE"] = "2"
+    rv = headers.get("X-BAPI-RECV-WINDOW")
+    if rv is not None and not isinstance(rv, str):
+        headers["X-BAPI-RECV-WINDOW"] = str(rv)
+    headers.setdefault("Accept", "application/json")
     return full_url, headers
+
+
+# async def get_position_mode() -> dict:
+#     """Gerçek modu /v5/position/list (Bybit) üzerinden türetir."""
+#     url = f"{BASE_URL}{ENDPOINTS['POSITION_RISK']}"
+def _pos_endpoint() -> str:
+    """POSITION_RISK / POSITIONS alias farkını güvenle köprüle."""
+    ep = (
+        ENDPOINTS.get("POSITION_RISK")
+        or ENDPOINTS.get("POSITIONS")
+        or "/v5/position/list"
+    )
+    if not ep.startswith("/"):
+        ep = "/" + ep
+    return ep
 
 
 async def get_position_mode() -> dict:
     """Gerçek modu /v5/position/list (Bybit) üzerinden türetir."""
-    url = f"{BASE_URL}{ENDPOINTS['POSITION_RISK']}"
+    url = f"{BASE_URL}{_pos_endpoint()}"
 
     async def _once(params: Dict) -> dict:
+        # İmzayı üret
         full_url, headers = await build_signed_get(
             url, params, recv_window=RECV_WINDOW_LONG_MS
         )
+        # Log için güvenli header kopyası (anahtar ve imzayı maskele)
+        _safe_headers = deepcopy(headers)
+        if "X-BAPI-API-KEY" in _safe_headers:
+            _k = _safe_headers["X-BAPI-API-KEY"]
+            _safe_headers["X-BAPI-API-KEY"] = (
+                (_k[:3] + "…" + _k[-3:])
+                if isinstance(_k, str) and len(_k) > 6
+                else "***"
+            )
+        if "X-BAPI-SIGN" in _safe_headers:
+            _safe_headers["X-BAPI-SIGN"] = "***"
+
+        # arequest_with_retry yerine ham httpx çağrısı (body'yi kesin görmek için)
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SHORT) as c:
-            r = await arequest_with_retry(
-                c,
-                "GET",
+            r = await c.get(
                 full_url,
                 headers=headers,
                 timeout=HTTP_TIMEOUT_SHORT,
-                max_retries=1,
-                rebuild_async=lambda: build_signed_get(
-                    url, params, recv_window=RECV_WINDOW_LONG_MS
-                ),
+                follow_redirects=False,
             )
+
+        # Hata varsa ham gövdeyi oku ve logla
+        if r.status_code >= 400:
+            body_bytes = r.content  # bytes
+            try:
+                body_text = body_bytes.decode("utf-8", errors="replace")
+            except Exception:
+                body_text = str(body_bytes)
+            logger.error(
+                "get_position_mode error status=%s url=%s req_headers=%s resp_headers=%s body=%s",
+                r.status_code,
+                str(r.request.url),
+                _safe_headers,
+                dict(r.headers),
+                body_text,
+            )
+            # ---- TANILAMA: Anahtarın/ortamın gerçek retMsg'ini gör ----
+            try:
+                # /v5/user/query-api → API anahtarı ve izinleri hakkında direkt JSON döner
+                diag_url = f"{BASE_URL}/v5/user/query-api"
+                diag_full, diag_headers = await build_signed_post(
+                    diag_url, {}, recv_window=RECV_WINDOW_LONG_MS
+                )
+                async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SHORT) as c2:
+                    dr = await c2.post(
+                        diag_full,
+                        headers=diag_headers,
+                        json={},
+                        timeout=HTTP_TIMEOUT_SHORT,
+                    )
+
+                dtext = dr.text
+                logger.error(
+                    "bybit diag query-api status=%s url=%s body=%s",
+                    dr.status_code,
+                    str(diag_full),
+                    dtext,
+                )
+            except Exception as _diag_err:
+                logger.error("bybit diag query-api failed: %s", _diag_err)
+            # status>=400 ise üst seviyedeki except bloğu da çalışsın diye raise et
             r.raise_for_status()
+
+        # 2xx ise JSON parse
+        try:
             data = r.json() or {}
-            lst = (data.get("result") or {}).get("list") or []
-            for row in lst:
+        except Exception:
+            # body_text bu noktada tanımlı olmayabilir; güvenli şekilde üret.
+            try:
+                _bt = r.text
+            except Exception:
                 try:
-                    if int(str(row.get("positionIdx", 0))) in (1, 2):
-                        return {"success": True, "mode": "hedge", "data": data}
-                except (ValueError, TypeError):
-                    pass
-            return {"success": True, "mode": "one_way", "data": data}
+                    _bt = (r.content or b"").decode("utf-8", errors="replace")
+                except Exception:
+                    _bt = str(r.content)
+            logger.error(
+                "get_position_mode non-json body url=%s body=%s",
+                str(r.request.url),
+                _bt,
+            )
+            return {"success": True, "mode": "one_way", "data": {}}
+
+        lst = (data.get("result") or {}).get("list") or []
+        for row in lst:
+            try:
+                if int(str(row.get("positionIdx", 0))) in (1, 2):
+                    return {"success": True, "mode": "hedge", "data": data}
+            except (ValueError, TypeError):
+                pass
+        return {"success": True, "mode": "one_way", "data": data}
 
     try:
         # sembolsüz dene; boşsa BTCUSDT ile bir daha
@@ -144,13 +262,21 @@ async def get_position_mode() -> dict:
             return await _once({"category": "linear", "symbol": "BTCUSDT"})
         return res
     except httpx.HTTPStatusError as exc:
+        # Bybit v5 hata gövdesi: {"retCode":..., "retMsg":"..."} — metin ve json'u birlikte değerlendir
+        _text = exc.response.text
         try:
-            j = exc.response.json()
+            j = exc.response.json() or {}
         except (ValueError, TypeError):
             j = {}
-        if j.get("code") in (-1021, "10006"):
+        ret_code = j.get("retCode")
+        ret_msg = j.get("retMsg") or _text
+        # Saat kayması / recvWindow / timestamp sorunları için tek retry
+        if ret_code in (-1021, 10006, "10006"):
             logger.warning(
-                "(-1021) time drift was caught; serverTime will be re-fetched and tried once."
+                # "(-1021) time drift was caught; serverTime will be re-fetched and tried once."
+                "Bybit drift/recvWindow şüphesi (retCode=%s, msg=%s); serverTime yenilenip tekrar denenecek.",
+                ret_code,
+                ret_msg,
             )
             try:
                 # küçük bekleme jitter’ı (drift/clock skew ısrarını azaltır)
@@ -164,8 +290,13 @@ async def get_position_mode() -> dict:
                 TypeError,
             ):
                 pass
+        # Hem text hem json'u yaz ki { } kalmasın
         logger.error(
-            "get_position_mode HTTP %s: %s", exc.response.status_code, exc.response.text
+            "get_position_mode HTTP %s: %s | body_text=%s body_json=%s",
+            exc.response.status_code,
+            ret_msg,
+            _text,
+            j,
         )
         return {"success": False, "message": exc.response.text}
     except (httpx.RequestError, asyncio.TimeoutError, ValueError, TypeError) as e:
@@ -180,12 +311,20 @@ async def set_position_mode(mode: str) -> dict:
     if target not in ("one_way", "hedge"):
         return {"success": False, "message": "invalid mode"}
     params = {"category": "linear", "mode": 0 if target == "one_way" else 3}
+    # full_url, headers = await build_signed_post(
+    #     url, params, recv_window=RECV_WINDOW_LONG_MS
+    # )
     full_url, headers = await build_signed_post(
         url, params, recv_window=RECV_WINDOW_LONG_MS
     )
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SHORT) as c:
-            body = json.dumps(params).encode("utf-8")
+            # body = json.dumps(params).encode("utf-8")
+
+            # İmza ile birebir aynı gövde: kanonik JSON (boşluksuz, utf-8)
+            body = json.dumps(params, separators=(",", ":"), ensure_ascii=False).encode(
+                "utf-8"
+            )
             r = await c.post(
                 full_url, headers=headers, content=body, timeout=HTTP_TIMEOUT_SHORT
             )
@@ -193,10 +332,19 @@ async def set_position_mode(mode: str) -> dict:
                 r.raise_for_status()
             except httpx.HTTPStatusError:
                 # taze imza ile bir kez daha dene
+
+                # full_url, headers = await build_signed_post(
+                #     url, params, recv_window=RECV_WINDOW_LONG_MS
+                # )
+                # body = json.dumps(params).encode("utf-8")
+
                 full_url, headers = await build_signed_post(
                     url, params, recv_window=RECV_WINDOW_LONG_MS
                 )
-                body = json.dumps(params).encode("utf-8")
+                # Gövde aynı kanonik kuralda kalmalı
+                body = json.dumps(
+                    params, separators=(",", ":"), ensure_ascii=False
+                ).encode("utf-8")
                 r = await c.post(
                     full_url, headers=headers, content=body, timeout=HTTP_TIMEOUT_SHORT
                 )
@@ -230,7 +378,12 @@ async def set_leverage(symbol: str, leverage: int) -> dict:
     full_url, headers = await build_signed_post(url, params, recv_window=RECV_WINDOW_MS)
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SHORT) as client:
-            body = json.dumps(params).encode("utf-8")
+            # body = json.dumps(params).encode("utf-8")
+
+            # İmza ile birebir aynı gövde: kanonik JSON (boşluksuz, utf-8)
+            body = json.dumps(params, separators=(",", ":"), ensure_ascii=False).encode(
+                "utf-8"
+            )
             resp = await client.post(
                 full_url, headers=headers, content=body, timeout=HTTP_TIMEOUT_SHORT
             )
@@ -238,10 +391,19 @@ async def set_leverage(symbol: str, leverage: int) -> dict:
                 resp.raise_for_status()
             except httpx.HTTPStatusError:
                 # taze imza ile bir kez daha dene
+
+                # full_url, headers = await build_signed_post(
+                #     url, params, recv_window=RECV_WINDOW_LONG_MS
+                # )
+                # body = json.dumps(params).encode("utf-8")
+
                 full_url, headers = await build_signed_post(
                     url, params, recv_window=RECV_WINDOW_LONG_MS
                 )
-                body = json.dumps(params).encode("utf-8")
+                # Gövde aynı kanonik kuralda kalmalı
+                body = json.dumps(
+                    params, separators=(",", ":"), ensure_ascii=False
+                ).encode("utf-8")
                 resp = await client.post(
                     full_url, headers=headers, content=body, timeout=HTTP_TIMEOUT_SHORT
                 )

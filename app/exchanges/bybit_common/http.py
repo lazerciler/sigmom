@@ -77,7 +77,7 @@ class BybitHttp:
             "X-BAPI-TIMESTAMP": str(ts),
             "X-BAPI-SIGN": sig,
             "X-BAPI-RECV-WINDOW": str(int(recv_ms)),
-            "Content-Type": "application/json",
+            "X-BAPI-SIGN-TYPE": "2",
         }
         if self.extra_headers:
             hdr.update(self.extra_headers())
@@ -112,4 +112,6 @@ class BybitHttp:
         headers = self._headers(
             ts, sig, self.recv_long if window == "long" else self.recv_short
         )
+        # Content-Type sadece gövdeli isteklerde (POST/PUT/PATCH) gereklidir.
+        headers["Content-Type"] = "application/json"
         return full_url, headers

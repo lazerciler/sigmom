@@ -1,3 +1,7 @@
+# tests/test_trade_helpers.py
+# Python 3.9
+
+# noinspection PyPackageRequirements
 import pytest
 from decimal import Decimal
 from crud.trade import pick_close_price, compute_pnl

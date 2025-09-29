@@ -26,39 +26,103 @@ FUTURES_RECV_WINDOW_LONG_MS = settings.FUTURES_RECV_WINDOW_LONG_MS
 RECV_WINDOW_MS = FUTURES_RECV_WINDOW_MS
 RECV_WINDOW_LONG_MS = FUTURES_RECV_WINDOW_LONG_MS
 
-# Projede borsaya özel API anahtarları .env'de olmayabilir; testlerde ağa çıkmıyoruz.
-API_KEY = getattr(settings, f"{EXCHANGE_NAME.upper()}_API_KEY", "") or ""
-API_SECRET = getattr(settings, f"{EXCHANGE_NAME.upper()}_API_SECRET", "") or ""
+# # Projede borsaya özel API anahtarları .env'de olmayabilir; testlerde ağa çıkmıyoruz.
+# API_KEY = getattr(settings, f"{EXCHANGE_NAME.upper()}_API_KEY", "") or ""
+# API_SECRET = getattr(settings, f"{EXCHANGE_NAME.upper()}_API_SECRET", "") or ""
+# BASE_URL = "https://api-testnet.bybit.com"
+
+# Settings modelinde alan yoksa AttributeError atmaması için default=None veriyoruz
+API_KEY = getattr(settings, f"{EXCHANGE_NAME.upper()}_API_KEY", None)
+API_SECRET = getattr(settings, f"{EXCHANGE_NAME.upper()}_API_SECRET", None)
 BASE_URL = "https://api-testnet.bybit.com"
 
+# Fail fast: anahtar/secret yoksa anlaşılır mesajla uygulamayı durdur.
+if not API_KEY or not API_SECRET:
+    raise RuntimeError(
+        f"[{EXCHANGE_NAME}] API key/secret eksik. .env dosyasına "
+        f"{EXCHANGE_NAME.upper()}_API_KEY ve {EXCHANGE_NAME.upper()}_API_SECRET ekleyin."
+    )
+
 POSITION_MODE = "one_way"  # "one_way" or "hedge"
+
+# Hesap tipi: UNIFIED, CONTRACT veya AUTO (önce UNIFIED dener, hata alırsa CONTRACT)
+ACCOUNT_TYPE = (
+    (
+        getattr(settings, f"{EXCHANGE_NAME.upper()}_ACCOUNT_TYPE", None)
+        or getattr(settings, "BYBIT_ACCOUNT_TYPE", None)
+        or "AUTO"
+    )
+    .strip()
+    .upper()
+)
 
 # userTrades aralığı için geriye bakış (ms)
 USERTRADES_LOOKBACK_MS = 120_000  # 60_000 kısa kalabilir bu yüzden 120 önerilir.
 
-KLINES_PATH = "/fapi/v1/klines"
+# ---- KLINES (public) için UI/Router entegrasyonu ----
+# Router (/api/market/klines) 'tf' paramını kullanır ve burada TF_MAP üzerinden
+# Bybit V5 aralığına çevrilir. Destekli değerler: 1 3 5 15 30 60 120 240 360 720 D W M
+TF_MAP = {
+    "1m": "1",
+    "3m": "3",
+    "5m": "5",
+    "15m": "15",
+    "30m": "30",
+    "1h": "60",
+    "2h": "120",
+    "4h": "240",
+    "6h": "360",
+    "12h": "720",
+    "1d": "D",
+    "1w": "W",
+    "1M": "M",
+}
 
+
+# Bybit V5 limit üst sınırı
+KLINES_LIMIT_MAX = 1000
+
+# Generic fallback için param anahtarları
 KLINES_PARAMS = {"symbol": "symbol", "interval": "interval", "limit": "limit"}
 
-KLINES_LIMIT_MAX = 1500
 
-TF_MAP = {
-    "1m": "1m",
-    "3m": "3m",
-    "5m": "5m",
-    "15m": "15m",
-    "30m": "30m",
-    "1h": "1h",
-    "2h": "2h",
-    "4h": "4h",
-    "6h": "6h",
-    "8h": "8h",
-    "12h": "12h",
-    "1d": "1d",
-    "3d": "3d",
-    "1w": "1w",
-    "1M": "1M",
-}
+# Router generiği tarafından çağrılır: Bybit V5 paramlarını kur
+def build_klines_params(symbol: str, interval: str, limit: int) -> dict:
+    # GET /v5/market/kline?category=linear&symbol=BTCUSDT&interval=1&limit=200
+    return {
+        "category": "linear",
+        "symbol": symbol,
+        "interval": interval,
+        "limit": int(limit),
+    }
+
+
+# Router generiği tarafından çağrılır: Bybit V5 cevabını normalize et
+def parse_klines(j):
+    """
+    Beklenen: {"retCode":0, "result":{"list":[ [start,open,high,low,close,volume,...], ...]}}
+    UI ms epoch beklediğinden 'start' ms olarak bırakılır.
+    Geri dönüş: list[list] → [ts_ms, o, h, l, c]
+    """
+    try:
+        rows = (j or {}).get("result", {}).get("list", []) or []
+    except Exception:
+        return []
+    out = []
+    for r in rows:
+        try:
+            ts = int(r[0])
+            op = float(r[1])
+            hi = float(r[2])
+            lo = float(r[3])
+            cl = float(r[4])
+            out.append([ts, op, hi, lo, cl])
+        except Exception:
+            continue
+    # Bybit genelde yeni→eski verir; grafik için kronolojik sırala
+    out.sort(key=lambda x: x[0])
+    return out
+
 
 # Tüm REST endpoint path'leri burada (sadece path, domain değil)
 ENDPOINTS = {
@@ -79,4 +143,5 @@ ENDPOINTS = {
     "POSITION_MODE_GET": "/v5/position/list",
     "LEVERAGE": "/v5/position/set-leverage",
     "INCOME": "/v5/position/closed-pnl",
+    "POSITION_SIDE_DUAL": "/v5/position/switch-mode",  # sadece alias; Binance uyarısını susturur
 }

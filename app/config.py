@@ -77,6 +77,25 @@ class Settings(BaseSettings):
         default="", env="BINANCE_FUTURES_MAINNET_API_SECRET"
     )
 
+    # Bybit ortak hesap tipi (UNIFIED / CONTRACT). Opsiyonel; modül tarafı AUTO fallback yapabilir.
+    BYBIT_ACCOUNT_TYPE: Optional[str] = Field(default=None, env="BYBIT_ACCOUNT_TYPE")
+
+    # Bybit Futures Testnet
+    BYBIT_FUTURES_TESTNET_API_KEY: str = Field(
+        default="", env="BYBIT_FUTURES_TESTNET_API_KEY"
+    )
+    BYBIT_FUTURES_TESTNET_API_SECRET: str = Field(
+        default="", env="BYBIT_FUTURES_TESTNET_API_SECRET"
+    )
+
+    # Bybit Futures Mainnet (istersen sonra kullanırsın)
+    BYBIT_FUTURES_MAINNET_API_KEY: str = Field(
+        default="", env="BYBIT_FUTURES_MAINNET_API_KEY"
+    )
+    BYBIT_FUTURES_MAINNET_API_SECRET: str = Field(
+        default="", env="BYBIT_FUTURES_MAINNET_API_SECRET"
+    )
+
     # MEXC Futures Mainnet
     MEXC_FUTURES_MAINNET_API_KEY: str = Field(
         default="", env="MEXC_FUTURES_MAINNET_API_KEY"

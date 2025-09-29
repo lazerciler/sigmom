@@ -27,9 +27,13 @@ def _get_exchange_settings(ex_override: Optional[str] = None):
         )
 
     # Her borsa kendi path ve param isimlerini tanımlar
-    # path: KLINES_PATH yoksa ENDPOINTS["KLINES"]'e düş
+    # path: önce KLINES_PATH, yoksa ENDPOINTS["KLINES"]; hiçbiri yoksa hata
     endpoints = getattr(s, "ENDPOINTS", {}) or {}
-    path = getattr(s, "KLINES_PATH", endpoints.get("KLINES", "/fapi/v1/klines"))
+    path = getattr(s, "KLINES_PATH", None) or endpoints.get("KLINES")
+    if not path:
+        raise HTTPException(
+            status_code=500, detail="Seçili borsa için KLINES endpoint tanımlı değil"
+        )
 
     # Parametre adları: varsayılan (symbol/interval/limit).
     param_keys = getattr(

@@ -31,6 +31,8 @@
 │   │   └── auth.py
 │   ├── exchanges/
 │   │   ├── contract.py
+│   │   ├── binance_common/
+│   │   │   └── http.py
 │   │   ├── binance_futures_mainnet/
 │   │   │   ├── __init__.py
 │   │   │   ├── account.py
@@ -47,9 +49,21 @@
 │   │   │   ├── settings.py
 │   │   │   ├── sync.py
 │   │   │   └── utils.py
+│   │   ├── bybit_common/
+│   │   │   └── http.py
+│   │   ├── bybit_futures_testnet/
+│   │   │   ├── __init__.py
+│   │   │   ├── account.py
+│   │   │   ├── order_handler.py
+│   │   │   ├── positions.py
+│   │   │   ├── settings.py
+│   │   │   ├── sync.py
+│   │   │   └── utils.py
 │   │   └── common/
 │   │       ├── meta_cache.py
-│   │       └── safety.py
+│   │       ├── safety.py
+│   │       └── http/
+│   │           └── retry.py
 │   ├── handlers/
 │   │   ├── __init__.py
 │   │   ├── order_verification_handler.py
@@ -168,8 +182,11 @@
 │   ├── seed_demo_users.py
 │   └── zip_logger_backup.py
 └── tests/
-    ├── dev_mock_dependencies.py
+    ├── test_binance_testnet_smoke.py
+    ├── test_bybit_server_time.py
+    ├── test_bybit_testnet_smoke.py
     ├── test_order_params.py
     ├── test_order_rules_unit.py
+    ├── test_positions.py
     ├── test_trade_close.py
     └── test_trade_helpers.py

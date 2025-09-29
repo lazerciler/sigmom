@@ -16,6 +16,7 @@ from .settings import (
     RECV_WINDOW_MS,
     HTTP_TIMEOUT_SHORT,
     HTTP_TIMEOUT_LONG,
+    ACCOUNT_TYPE,
 )
 from .utils import build_signed_get
 
@@ -65,20 +66,35 @@ def _to_ms(ts_like: Union[int, float, str, datetime]) -> int:
 
 
 async def get_account_balance():
-    """Bybit V5: /v5/account/wallet-balance"""
+    """Bybit V5: /v5/account/wallet-balance (accountType zorunlu)"""
     url = BASE_URL + ENDPOINTS["BALANCE"]
-    full_url, headers = await build_signed_get(url, {}, recv_window=RECV_WINDOW_MS)
-    async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SHORT) as client:
-        r = await arequest_with_retry(
-            client,
-            "GET",
-            full_url,
-            headers=headers,
-            timeout=HTTP_TIMEOUT_SHORT,
-            max_retries=1,
+
+    async def _call(acc_type: str):
+        params = {"accountType": acc_type}
+        full_url, headers = await build_signed_get(
+            url, params, recv_window=RECV_WINDOW_MS
         )
-        r.raise_for_status()
-        return r.json()
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SHORT) as client:
+            r = await arequest_with_retry(
+                client,
+                "GET",
+                full_url,
+                headers=headers,
+                timeout=HTTP_TIMEOUT_SHORT,
+                max_retries=1,
+            )
+            r.raise_for_status()
+            return r.json()
+
+    at = (ACCOUNT_TYPE or "AUTO").upper()
+    if at == "AUTO":
+        # önce UNIFIED dene, olmazsa CONTRACT
+        try:
+            return await _call("UNIFIED")
+        except httpx.HTTPStatusError:
+            return await _call("CONTRACT")
+    else:
+        return await _call(at)
 
 
 # -------------------- Yardımcılar: balances & exchangeInfo --------------------
