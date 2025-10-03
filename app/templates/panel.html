@@ -1,7 +1,8 @@
 <!doctype html><!-- app/templates/panel.html -->
 <html lang="tr" class="{% if request.cookies.get('theme') == 'dark' %}dark{% endif %}"
       data-trades-allowed="{{ (user is not none) | tojson }}"
-      data-equity-allowed="{{ (referral_verified | default(false)) | tojson }}">
+      data-equity-allowed="{{ (referral_verified | default(false)) | tojson }}"
+      data-default-exchange="{{ default_exchange_from_server }}">
 <head>
   <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
@@ -250,7 +251,7 @@
           </div>
           <div id="maConfluenceLbl"
                class="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-            7↔25, 25↔99, 7↔99 yakınlık (%)
+            MA kombinasyon yakınlığı (%)
           </div>
         </div>
         {% endif %}
@@ -321,7 +322,7 @@
   <!-- flags -->
   <script src="{{ url_for('static', path='js/panel_boot.js') }}?v=2" defer></script>
   <!-- Panel / Panel JS -->
-  <script src="{{ url_for('static', path='js/panel_main.js') }}?v=202509010a" defer></script>
+  <script src="{{ url_for('static', path='js/panel_main.js') }}?v=202501003b" defer></script>
   {% if referral_verified %}
   <script src="{{ url_for('static', path='js/panel_equity.js') }}?v=20250822eb" defer></script>
   {% endif %}

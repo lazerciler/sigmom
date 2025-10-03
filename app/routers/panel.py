@@ -9,6 +9,7 @@ from sqlalchemy import text
 from app.dependencies.auth import get_current_user
 from app.database import get_db
 from pathlib import Path
+from app.config import settings
 
 router = APIRouter()
 
@@ -54,6 +55,8 @@ async def panel(
         "user_name": display_name,
         "referral_verified": referral_verified,
         "feed_url": None,
+        # panel.html'deki data-default-exchange için
+        "default_exchange_from_server": settings.DEFAULT_EXCHANGE,
     }
 
     # Yerel scriptlerle sade CSP (yalnızca 'self')

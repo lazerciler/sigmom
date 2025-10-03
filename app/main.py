@@ -169,8 +169,13 @@ async def verifier_iteration(db, exchange_name: str) -> None:
     try:
         verifier_logger.info("→ Checking pending trades for %s", exchange_name)
         execution = load_execution_module(exchange_name)
-        await verify_pending_trades_for_execution(db, execution)
-        await verify_closed_trades_for_execution(db, execution)
+
+        # Çöp fikir: Parameter 'exchange_name' unfilled (exchange), Unexpected argument (exchange=exchange_name)
+        # await verify_pending_trades_for_execution(db, execution=execution)
+        # await verify_closed_trades_for_execution(db, execution=execution, exchange=exchange_name)
+
+        await verify_pending_trades_for_execution(db, exchange_name, execution)
+        await verify_closed_trades_for_execution(db, execution, exchange_name)
 
         # Açık pozisyonların unrealized PnL senkronu (borsa → DB)
         try:

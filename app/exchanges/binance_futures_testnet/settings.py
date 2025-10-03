@@ -26,9 +26,21 @@ RECV_WINDOW_LONG_MS = (
     or settings.FUTURES_RECV_WINDOW_LONG_MS
 )
 
-API_KEY = getattr(settings, f"{EXCHANGE_NAME.upper()}_API_KEY")
-API_SECRET = getattr(settings, f"{EXCHANGE_NAME.upper()}_API_SECRET")
+# API_KEY = getattr(settings, f"{EXCHANGE_NAME.upper()}_API_KEY")
+# API_SECRET = getattr(settings, f"{EXCHANGE_NAME.upper()}_API_SECRET")
+# BASE_URL = "https://testnet.binancefuture.com"
+
+# Settings modelinde alan yoksa AttributeError atmaması için default=None veriyoruz
+API_KEY = getattr(settings, f"{EXCHANGE_NAME.upper()}_API_KEY", None)
+API_SECRET = getattr(settings, f"{EXCHANGE_NAME.upper()}_API_SECRET", None)
 BASE_URL = "https://testnet.binancefuture.com"
+
+# Fail fast: anahtar/secret yoksa anlaşılır mesajla uygulamayı durdur.
+if not API_KEY or not API_SECRET:
+    raise RuntimeError(
+        f"[{EXCHANGE_NAME}] API key/secret eksik. .env dosyasına "
+        f"{EXCHANGE_NAME.upper()}_API_KEY ve {EXCHANGE_NAME.upper()}_API_SECRET ekleyin."
+    )
 
 POSITION_MODE = "one_way"  # "one_way" or "hedge"
 

@@ -2,9 +2,10 @@
 # app/routers/panel_data.py
 # Python 3.9
 
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 import asyncio
 import httpx
+import math
 from typing import Dict, Any, Tuple, List, Optional, Literal, Sequence
 from datetime import datetime, timezone, timedelta
 from fastapi import APIRouter, Depends, Query, HTTPException
@@ -18,18 +19,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import StrategyOpenTrade, StrategyTrade, RawSignal
+from app.services.quick_balance_helpers import (
+    DEFAULT_BALANCE_FALLBACK,
+    call_get_unrealized,
+    extract_unrealized_breakdown,
+    build_last_trade_payload,
+    has_open_side,
+    to_decimal,
+)
 
 router = APIRouter(prefix="/api/me", tags=["me"])
 
 
-def _to_dec(x: Any) -> Decimal:
-    try:
-        return Decimal(str(x))
-    except (InvalidOperation, ValueError, TypeError):
-        return Decimal("0")
-
-
-# ---------- Yardımcılar ----------
 def _to_epoch(dt: Optional[datetime]) -> int:
     if not dt:
         return 0
@@ -97,13 +98,75 @@ class RawSignalLite(BaseModel):
     mode: Optional[str] = None
 
 
+class QuickBalanceNet(BaseModel):
+    value: float
+    source: Literal["exchange-income", "trades-sum", "none"]
+    window: Optional[Dict[str, Optional[str]]] = None
+
+
+class QuickBalanceUnrealized(BaseModel):
+    long: float
+    short: float
+    total: float
+    mode: Optional[Literal["one_way", "hedge"]] = None
+    has_long: bool
+    has_short: bool
+    show_split: bool
+    source: Literal["legs", "positions", "aggregate", "fallback", "none"]
+
+
+class QuickBalanceWallet(BaseModel):
+    amount: float
+    currency: Optional[str] = None
+    source: Literal["exchange", "simulated", "unavailable"]
+    approximate: bool = False
+    note: Optional[str] = None
+
+
+class QuickBalanceLastTrade(BaseModel):
+    symbol: Optional[str] = None
+    side: Optional[str] = None
+    pnl: float = 0.0
+    pnl_abs: float = 0.0
+    pnl_sign: str = ""
+    pnl_positive: bool = False
+    pnl_negative: bool = False
+    timestamp: Optional[datetime] = None
+
+
+class QuickBalanceResponse(BaseModel):
+    symbol: str
+    exchange: str
+    net: QuickBalanceNet
+    open_trade_count: int
+    unrealized: QuickBalanceUnrealized
+    wallet: QuickBalanceWallet
+    last_trade: Optional[QuickBalanceLastTrade] = None
+    generated_at: datetime
+
+
+@router.get("/panel/status")
+async def panel_status():
+    """
+    Panelin etkilenmesi gereken 'etkin borsa' bilgisini bildirir.
+    Şimdilik .env/ayarlar (settings.DEFAULT_EXCHANGE) kaynak alınır.
+    Sunucu yeniden başlatıldığında/ayar değiştiğinde burada da değişir.
+    """
+    return {"exchange": settings.DEFAULT_EXCHANGE}
+
+
 # ---------- Endpoints (PUBLIC) ----------
 @router.get("/symbols")
 async def symbols_public(
+    exchange: str = Query(settings.DEFAULT_EXCHANGE),
     db: AsyncSession = Depends(get_db),
 ):
-    q1 = select(func.distinct(StrategyOpenTrade.symbol))
-    q2 = select(func.distinct(StrategyTrade.symbol))
+    q1 = select(func.distinct(StrategyOpenTrade.symbol)).where(
+        StrategyOpenTrade.exchange == exchange
+    )
+    q2 = select(func.distinct(StrategyTrade.symbol)).where(
+        StrategyTrade.exchange == exchange
+    )
     s1 = [r[0] for r in (await db.execute(q1)).all() if r[0]]
     s2 = [r[0] for r in (await db.execute(q2)).all() if r[0]]
     return {"symbols": sorted({*s1, *s2})}
@@ -113,6 +176,7 @@ async def symbols_public(
 async def markers_public(
     symbol: Optional[str] = Query(None, description="Tek sembol. Örn: BTCUSDT"),
     tf: str = Query(..., description="Timeframe: 1m,5m,15m,1h,4h,1d"),
+    exchange: str = Query(settings.DEFAULT_EXCHANGE),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -133,8 +197,10 @@ async def markers_public(
         raise HTTPException(status_code=400, detail=f"Geçersiz tf: {tf}")
 
     # === 1) Hâlâ açık pozisyonlar -> OPEN ===
-    q_open = select(StrategyOpenTrade).where(
-        func.lower(StrategyOpenTrade.status) == "open"
+    q_open = (
+        select(StrategyOpenTrade)
+        .where(func.lower(StrategyOpenTrade.status) == "open")
+        .where(StrategyOpenTrade.exchange == exchange)
     )
     if sym_list:
         q_open = q_open.where(func.upper(StrategyOpenTrade.symbol).in_(sym_list))
@@ -165,7 +231,7 @@ async def markers_public(
             )
         )
 
-    q_tr = select(StrategyTrade)
+    q_tr = select(StrategyTrade).where(StrategyTrade.exchange == exchange)
     if sym_list:
         q_tr = q_tr.where(func.upper(StrategyTrade.symbol).in_(sym_list))
     tr_rows = (await db.execute(q_tr)).scalars().all()
@@ -183,8 +249,10 @@ async def markers_public(
     open_ids = [k for k in latest_by_open.keys() if not k.startswith("__")]
     sot_map: Dict[str, StrategyOpenTrade] = {}
     if open_ids:
-        q_sot = select(StrategyOpenTrade).where(
-            StrategyOpenTrade.public_id.in_(open_ids)
+        q_sot = (
+            select(StrategyOpenTrade)
+            .where(StrategyOpenTrade.public_id.in_(open_ids))
+            .where(StrategyOpenTrade.exchange == exchange)
         )
         if sym_list:
             q_sot = q_sot.where(func.upper(StrategyOpenTrade.symbol).in_(sym_list))
@@ -251,6 +319,7 @@ async def markers_public(
 @router.get("/open-trades", response_model=List[OpenTradeOut])
 async def open_trades_public(
     symbol: Optional[str] = Query(None, min_length=1, max_length=64),
+    exchange: str = Query(settings.DEFAULT_EXCHANGE),
     db: AsyncSession = Depends(get_db),
 ):
     import importlib
@@ -258,6 +327,7 @@ async def open_trades_public(
     q = (
         select(StrategyOpenTrade)
         .where(func.lower(StrategyOpenTrade.status) == "open")
+        .where(StrategyOpenTrade.exchange == exchange)
         .order_by(StrategyOpenTrade.timestamp.desc())
     )
     if symbol:
@@ -312,10 +382,16 @@ async def open_trades_public(
 @router.get("/recent-trades", response_model=List[TradeOut])
 async def recent_trades_public(
     symbol: Optional[str] = Query(None, min_length=1, max_length=64),
+    exchange: str = Query(settings.DEFAULT_EXCHANGE),
     limit: int = Query(200, ge=1, le=1000),
     db: AsyncSession = Depends(get_db),
 ):
-    q = select(StrategyTrade).order_by(StrategyTrade.timestamp.desc()).limit(limit)
+    q = (
+        select(StrategyTrade)
+        .where(StrategyTrade.exchange == exchange)
+        .order_by(StrategyTrade.timestamp.desc())
+        .limit(limit)
+    )
     if symbol:
         q = q.where(StrategyTrade.symbol == symbol)
 
@@ -368,6 +444,7 @@ async def raw_signals_public(
 
 @router.get("/overview")
 async def overview_public(
+    exchange: str = Query(settings.DEFAULT_EXCHANGE),
     db: AsyncSession = Depends(get_db),
 ):
     # Açık pozisyon sayısı
@@ -376,6 +453,7 @@ async def overview_public(
             select(func.count())
             .select_from(StrategyOpenTrade)
             .where(func.lower(StrategyOpenTrade.status) == "open")
+            .where(StrategyOpenTrade.exchange == exchange)
         )
         or 0
     )
@@ -388,9 +466,9 @@ async def overview_public(
     since_7d = now - timedelta(days=7)
     pnl_7d = (
         await db.scalar(
-            select(func.coalesce(func.sum(StrategyTrade.realized_pnl), 0.0)).where(
-                StrategyTrade.timestamp >= since_7d
-            )
+            select(func.coalesce(func.sum(StrategyTrade.realized_pnl), 0.0))
+            .where(StrategyTrade.timestamp >= since_7d)
+            .where(StrategyTrade.exchange == exchange)
         )
         or 0.0
     )
@@ -402,6 +480,7 @@ async def overview_public(
             select(func.count())
             .select_from(StrategyTrade)
             .where(StrategyTrade.timestamp >= since_30d)
+            .where(StrategyTrade.exchange == exchange)
         )
         or 0
     )
@@ -410,6 +489,7 @@ async def overview_public(
             select(func.count())
             .select_from(StrategyTrade)
             .where(StrategyTrade.timestamp >= since_30d)
+            .where(StrategyTrade.exchange == exchange)
             .where(StrategyTrade.realized_pnl > 0)
         )
         or 0
@@ -473,6 +553,245 @@ async def me_balance(
         return {"available": 0.0, "equity": 0.0}
 
 
+@router.get("/quick-balance", response_model=QuickBalanceResponse)
+async def me_quick_balance(
+    symbol: str = Query(..., description="örn. BTCUSDT"),
+    exchange: str = Query(settings.DEFAULT_EXCHANGE),
+    trades_limit: int = Query(1000, ge=1, le=2000),
+    db: AsyncSession = Depends(get_db),
+):
+    """Tek çağrıda Quick Balance kartını doldurmak için gerekli tüm veriler."""
+
+    sym = symbol.strip().upper()
+    now = datetime.now(timezone.utc)
+
+    # Açık pozisyonları oku (toplam ve sembol bazlı dağılım)
+    q_open = (
+        select(StrategyOpenTrade)
+        .where(func.lower(StrategyOpenTrade.status) == "open")
+        .where(StrategyOpenTrade.exchange == exchange)
+        .order_by(StrategyOpenTrade.timestamp.desc())
+    )
+    open_rows = (await db.execute(q_open)).scalars().all()
+    open_count = len(open_rows)
+    open_for_symbol = [
+        row for row in open_rows if str(getattr(row, "symbol", "") or "").upper() == sym
+    ]
+
+    # Net PnL: önce borsa-onaylı hesap, gerekirse trade toplamı fallback
+    net_payload: Optional[dict] = None
+    try:
+        net_payload = await me_netpnl(
+            exchange=exchange,
+            symbol=sym,
+            since_days=None,
+            since_epoch=None,
+            detail=False,
+            db=db,
+        )
+    except HTTPException:
+        net_payload = None
+    except Exception:
+        net_payload = None
+
+    net_value_dec = Decimal("0")
+    net_source = "exchange-income"
+    net_window: Optional[Dict[str, Optional[str]]] = None
+    if isinstance(net_payload, dict):
+        net_value_dec = to_decimal(net_payload.get("net") or net_payload.get("net_pnl"))
+        raw_window = net_payload.get("window")
+        if isinstance(raw_window, dict):
+            net_window = {
+                "since": raw_window.get("since"),
+                "until": raw_window.get("until"),
+            }
+        src_raw = str(net_payload.get("source") or "").strip().lower()
+        if src_raw in {"exchange-income", "trades-sum"}:
+            net_source = src_raw
+    else:
+        net_payload = None
+
+    # Kapanan işlemler: toplam ve son işlem bilgisi (SADECE seçili borsa)
+    q_trades = (
+        select(StrategyTrade)
+        .where(StrategyTrade.exchange == exchange)
+        .where(func.upper(StrategyTrade.symbol) == sym)
+        .order_by(StrategyTrade.timestamp.desc())
+        .limit(trades_limit)
+    )
+    trade_rows = (await db.execute(q_trades)).scalars().all()
+    trades_sum = Decimal("0")
+    for row in trade_rows:
+        trades_sum += to_decimal(getattr(row, "realized_pnl", 0))
+
+    if net_payload is None:
+        if trade_rows:
+            net_value_dec = trades_sum
+            net_source = "trades-sum"
+        else:
+            net_value_dec = Decimal("0")
+            net_source = "none"
+    elif net_value_dec == 0 and trades_sum != 0:
+        net_value_dec = trades_sum
+        net_source = "trades-sum"
+
+    # === Unrealized PnL ===
+    # 1) ÖNCE DB (verifier yazıyor) → seçili sembol ve borsa için long/short toplamı
+    def _dec(x):
+        return to_decimal(getattr(x, "unrealized_pnl", 0))
+
+    long_db = sum(
+        _dec(r)
+        for r in open_for_symbol
+        if str(getattr(r, "side", "")).lower() == "long"
+    )
+    short_db = sum(
+        _dec(r)
+        for r in open_for_symbol
+        if str(getattr(r, "side", "")).lower() == "short"
+    )
+    total_db = long_db + short_db
+    breakdown: Optional[Dict[str, Any]] = None
+    if total_db != 0 or open_for_symbol:
+        breakdown = {
+            "long": long_db,
+            "short": short_db,
+            "has_long": bool(
+                long_db != 0
+                or any(
+                    str(getattr(r, "side", "")).lower() == "long"
+                    for r in open_for_symbol
+                )
+            ),
+            "has_short": bool(
+                short_db != 0
+                or any(
+                    str(getattr(r, "side", "")).lower() == "short"
+                    for r in open_for_symbol
+                )
+            ),
+            "mode": None,  # mod bilgisini adapter'dan alacağız (gerekirse)
+            "source": "aggregate",  # <- Pydantic Literal kabulü için
+        }
+    # 2) DB anlamsızsa adapter’a düş: account.get_unrealized → gerekirse tüm liste
+    account_mod = None
+    try:
+        exec_mod = load_execution_module(exchange)
+        account_mod = getattr(exec_mod, "account", None)
+    except Exception:
+        account_mod = None
+
+    if breakdown is None:
+        payload_primary = await call_get_unrealized(account_mod, sym, return_all=False)
+        if payload_primary is not None:
+            breakdown = extract_unrealized_breakdown(
+                payload_primary, sym, open_for_symbol
+            )
+
+    needs_fallback = breakdown is None or (
+        breakdown.get("source") == "none"
+        and breakdown.get("long") == Decimal("0")
+        and breakdown.get("short") == Decimal("0")
+        and not breakdown.get("has_long")
+        and not breakdown.get("has_short")
+    )
+    if needs_fallback:
+        payload_all = await call_get_unrealized(account_mod, sym, return_all=True)
+        if payload_all is not None:
+            breakdown = extract_unrealized_breakdown(payload_all, sym, open_for_symbol)
+
+    if breakdown is None:
+        breakdown = {
+            "long": Decimal("0"),
+            "short": Decimal("0"),
+            "has_long": has_open_side(open_for_symbol, "long"),
+            "has_short": has_open_side(open_for_symbol, "short"),
+            "mode": None,
+            "source": "none",
+        }
+
+    long_dec = breakdown.get("long", Decimal("0"))
+    short_dec = breakdown.get("short", Decimal("0"))
+    unreal_total_dec = long_dec + short_dec
+    mode = breakdown.get("mode")
+    show_split = bool(
+        (mode == "hedge")
+        and bool(breakdown.get("has_long"))
+        and bool(breakdown.get("has_short"))
+    )
+
+    # Cüzdan bakiyesi: gerçek → fallback olarak (varsayılan + net)
+    wallet_currency: Optional[str] = None
+    wallet_amount_float: Optional[float] = None
+    wallet_note: Optional[str] = None
+    wallet_source = "exchange"
+    wallet_approximate = False
+    try:
+        balance_payload = await me_balance(
+            exchange=exchange, asset=None, symbol=sym, currency=None, return_all=False
+        )
+    except Exception:
+        balance_payload = None
+
+    if isinstance(balance_payload, dict):
+        wallet_currency = (
+            balance_payload.get("currency")
+            or balance_payload.get("asset")
+            or balance_payload.get("symbol")
+        )
+        amount_candidate = None
+        for key in ("available", "balance", "equity", "walletBalance"):
+            if key in balance_payload:
+                amount_candidate = balance_payload.get(key)
+                break
+        if amount_candidate is not None:
+            amt_dec = to_decimal(amount_candidate)
+            wallet_amount_float = float(amt_dec)
+    if wallet_amount_float is None or not math.isfinite(wallet_amount_float):
+        wallet_amount_float = float(DEFAULT_BALANCE_FALLBACK + net_value_dec)
+        wallet_source = "simulated"
+        wallet_approximate = True
+        wallet_note = "Simülasyon: varsayılan sermaye + net PnL"
+    else:
+        wallet_note = "Aktif borsa bakiyesi"
+
+    last_payload = build_last_trade_payload(trade_rows[0] if trade_rows else None)
+    last_trade_view = QuickBalanceLastTrade(**last_payload) if last_payload else None
+
+    net_value_float = float(net_value_dec)
+    if not math.isfinite(net_value_float):
+        net_value_float = 0.0
+
+    response = QuickBalanceResponse(
+        symbol=sym,
+        exchange=exchange,
+        net=QuickBalanceNet(
+            value=net_value_float, source=net_source, window=net_window
+        ),
+        open_trade_count=open_count,
+        unrealized=QuickBalanceUnrealized(
+            long=float(long_dec),
+            short=float(short_dec),
+            total=float(unreal_total_dec),
+            mode=mode if mode in {"hedge", "one_way"} else None,
+            has_long=bool(breakdown.get("has_long")),
+            has_short=bool(breakdown.get("has_short")),
+            show_split=show_split,
+            source=str(breakdown.get("source") or "none"),
+        ),
+        wallet=QuickBalanceWallet(
+            amount=wallet_amount_float,
+            currency=wallet_currency,
+            source=wallet_source,
+            approximate=wallet_approximate,
+            note=wallet_note,
+        ),
+        last_trade=last_trade_view,
+        generated_at=now,
+    )
+    return response
+
+
 def _normalize_upnl(raw: Any) -> Tuple[Decimal, Decimal, Decimal]:
     """
     raw -> (total, long, short)
@@ -491,22 +810,22 @@ def _normalize_upnl(raw: Any) -> Tuple[Decimal, Decimal, Decimal]:
 
     # 1) Basit sayı
     if isinstance(raw, (int, float, str, Decimal)):
-        total = _to_dec(raw)
+        total = to_decimal(raw)
         return total, long_amt, short_amt
 
     # 2) Sözlük
     if isinstance(raw, dict):
         # {"unrealized": n, "legs": {...}}
         if "unrealized" in raw:
-            total = _to_dec(raw.get("unrealized"))
+            total = to_decimal(raw.get("unrealized"))
             legs = raw.get("legs") or {}
             if isinstance(legs, dict):
-                long_amt = _to_dec(legs.get("long", 0))
-                short_amt = _to_dec(legs.get("short", 0))
+                long_amt = to_decimal(legs.get("long", 0))
+                short_amt = to_decimal(legs.get("short", 0))
             else:
                 # bazen doğrudan {"long":..,"short":..} da gelebilir
-                long_amt = _to_dec(raw.get("long", 0))
-                short_amt = _to_dec(raw.get("short", 0))
+                long_amt = to_decimal(raw.get("long", 0))
+                short_amt = to_decimal(raw.get("short", 0))
 
             # Positions / rows vb. listeden L/S yeniden hesapla
             items = None
@@ -537,7 +856,7 @@ def _normalize_upnl(raw: Any) -> Tuple[Decimal, Decimal, Decimal]:
                         or it.get("pnl")
                         or 0
                     )
-                    dv = _to_dec(v)
+                    dv = to_decimal(v)
                     if side.startswith("long") or side == "l":
                         ll += dv
                     elif side.startswith("short") or side == "s":
@@ -555,8 +874,8 @@ def _normalize_upnl(raw: Any) -> Tuple[Decimal, Decimal, Decimal]:
 
         # {"long": a, "short": b}
         if ("long" in raw) or ("short" in raw):
-            long_amt = _to_dec(raw.get("long", 0))
-            short_amt = _to_dec(raw.get("short", 0))
+            long_amt = to_decimal(raw.get("long", 0))
+            short_amt = to_decimal(raw.get("short", 0))
             total = long_amt + short_amt
             return total, long_amt, short_amt
 
@@ -573,7 +892,7 @@ def _normalize_upnl(raw: Any) -> Tuple[Decimal, Decimal, Decimal]:
     if isinstance(raw, list):
         for it in raw:
             if not isinstance(it, dict):
-                total += _to_dec(it)
+                total += to_decimal(it)
                 continue
             side = str(
                 it.get("side")
@@ -593,7 +912,7 @@ def _normalize_upnl(raw: Any) -> Tuple[Decimal, Decimal, Decimal]:
                 or 0
             )
 
-            dv = _to_dec(v)
+            dv = to_decimal(v)
             total += dv
             if side.startswith("long"):
                 long_amt += dv
@@ -606,73 +925,7 @@ def _normalize_upnl(raw: Any) -> Tuple[Decimal, Decimal, Decimal]:
         return total, long_amt, short_amt
 
     # tanınmayan şekil → sadece toplamı almaya çalış
-    return _to_dec(raw), long_amt, short_amt
-
-
-# @router.get("/unrealized")
-# async def me_unrealized(
-#     exchange: str = Query(settings.DEFAULT_EXCHANGE),
-#     symbol: Optional[str] = Query(None),
-#     return_all: bool = Query(
-#         False,
-#         alias="all",
-#         description="Ham çıktıyı döndür (debug). Varsayılan: normalize + legs breakdown.",
-#     ),
-# ):
-#     """
-#     Döndürür:
-#       {
-#         "unrealized": <float>,                 # toplam (L+S)
-#         "legs": {"long": <float>, "short": <float>},
-#         "mode": "one_way" | "hedge"
-#       }
-#     ?all=1 verilirse borsa modülünün ham çıktısı aynen döner.
-#     """
-#     try:
-#         mod = importlib.import_module(f"app.exchanges.{exchange}.account")
-#         fn = getattr(mod, "get_unrealized", None)
-#         if not callable(fn):
-#             raise RuntimeError(f"{exchange}.account içinde get_unrealized(...) yok")
-#
-#         if inspect.iscoroutinefunction(fn):
-#             raw = await fn(symbol=symbol, return_all=return_all)
-#         else:
-#             raw = fn(symbol=symbol, return_all=return_all)
-#
-#         if return_all:
-#             return raw
-#
-#         total, long_amt, short_amt = _normalize_upnl(raw)
-#         # moddan pozisyon modu (varsa) oku; yoksa varsayılan
-#         try:
-#             ex = load_execution_module(exchange)
-#             mode = getattr(
-#                 getattr(ex, "order_handler", None), "POSITION_MODE", "one_way"
-#             )
-#         # except Exception:
-#         except (ImportError, AttributeError):
-#             mode = "one_way" if (short_amt == 0) else "hedge"  # kaba tahmin
-#
-#         # one_way/BOTH: legs 0 ise toplamı LONG'a yaz
-#         if str(mode) == "one_way" and long_amt == 0 and short_amt == 0 and total != 0:
-#             long_amt = total
-#
-#         return {
-#             "unrealized": float(total),
-#             "legs": {"long": float(long_amt), "short": float(short_amt)},
-#             "mode": mode,
-#         }
-#
-#     # except Exception as e:
-#     #     raise HTTPException(status_code=400, detail=str(e))
-#     except Exception:
-#         # UI'yi düşürmeyelim: güvenli sıfırlar döndür.
-#         # (Hata / credential eksikliği vb. durumlarda kartlar boş olsa da panel akmaya devam eder)
-#         return {
-#             "unrealized": 0.0,
-#             "legs": {"long": 0.0, "short": 0.0},
-#             "mode": "one_way",
-#         }
+    return to_decimal(raw), long_amt, short_amt
 
 
 @router.get("/unrealized")

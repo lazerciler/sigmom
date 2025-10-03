@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     # Uzun pencere
     FUTURES_RECV_WINDOW_LONG_MS: int = Field(15000, env="FUTURES_RECV_WINDOW_LONG_MS")
 
+    MARKET_MA_SMA_PERIODS: str = Field("7,25", env="MARKET_MA_SMA_PERIODS")
+    MARKET_MA_EMA_PERIODS: str = Field("99", env="MARKET_MA_EMA_PERIODS")
+    MARKET_MA_TOLERANCE_PCT: float = Field(1.5, env="MARKET_MA_TOLERANCE_PCT")
+
     # ---- (Opsiyonel) borsa-bazlı override'lar: set edilmezse None kalsın ----
     BINANCE_FUTURES_TESTNET_HTTP_TIMEOUT_SYNC: Optional[float] = Field(
         None, env="BINANCE_FUTURES_TESTNET_HTTP_TIMEOUT_SYNC"
@@ -88,21 +92,17 @@ class Settings(BaseSettings):
         default="", env="BYBIT_FUTURES_TESTNET_API_SECRET"
     )
 
-    # Bybit Futures Mainnet (istersen sonra kullanırsın)
-    BYBIT_FUTURES_MAINNET_API_KEY: str = Field(
-        default="", env="BYBIT_FUTURES_MAINNET_API_KEY"
-    )
-    BYBIT_FUTURES_MAINNET_API_SECRET: str = Field(
-        default="", env="BYBIT_FUTURES_MAINNET_API_SECRET"
-    )
+    # # Bybit Futures Mainnet (istersen sonra kullanırsın)
+    # BYBIT_FUTURES_MAINNET_API_KEY: str = Field(
+    #     default="", env="BYBIT_FUTURES_MAINNET_API_KEY"
+    # )
+    # BYBIT_FUTURES_MAINNET_API_SECRET: str = Field(
+    #     default="", env="BYBIT_FUTURES_MAINNET_API_SECRET"
+    # )
 
     # MEXC Futures Mainnet
-    MEXC_FUTURES_MAINNET_API_KEY: str = Field(
-        default="", env="MEXC_FUTURES_MAINNET_API_KEY"
-    )
-    MEXC_FUTURES_MAINNET_API_SECRET: str = Field(
-        default="", env="MEXC_FUTURES_MAINNET_API_SECRET"
-    )
+    MEXC_FUTURES_API_KEY: str = Field(default="", env="MEXC_FUTURES_API_KEY")
+    MEXC_FUTURES_API_SECRET: str = Field(default="", env="MEXC_FUTURES_API_SECRET")
 
     # Google OAuth
     GOOGLE_CLIENT_ID: str = Field(..., env="GOOGLE_CLIENT_ID")
@@ -122,7 +122,7 @@ class Settings(BaseSettings):
     # Allowed fund managers
     ALLOWED_FUND_MANAGER_IDS: str = Field("", env="ALLOWED_FUND_MANAGER_IDS")
 
-    @validator("SESSION_SECRET")
+    @validator("SESSION_SECRET", allow_reuse=True)
     def validate_session_secret(cls, v: str) -> str:  # noqa: N805
         if not v or not v.strip():
             raise ValueError("SESSION_SECRET must be set and not empty")
@@ -138,7 +138,32 @@ class Settings(BaseSettings):
             x.strip() for x in self.ALLOWED_FUND_MANAGER_IDS.split(",") if x.strip()
         ]
 
-    @root_validator(pre=True)
+    @staticmethod
+    def _parse_periods(raw: str) -> List[int]:
+        if raw is None:
+            return []
+        out: List[int] = []
+        for part in str(raw).replace(";", ",").split(","):
+            piece = part.strip()
+            if not piece:
+                continue
+            try:
+                val = int(piece)
+            except ValueError:
+                continue
+            if val > 0:
+                out.append(val)
+        return out
+
+    @property
+    def market_ma_sma_periods(self) -> List[int]:
+        return self._parse_periods(self.MARKET_MA_SMA_PERIODS)
+
+    @property
+    def market_ma_ema_periods(self) -> List[int]:
+        return self._parse_periods(self.MARKET_MA_EMA_PERIODS)
+
+    @root_validator(pre=True, allow_reuse=True)
     def validate_default_exchange(cls, values):  # noqa: N805
         active = values.get("ACTIVE_EXCHANGES", "")
         default = values.get("DEFAULT_EXCHANGE", "")

@@ -21,7 +21,6 @@
 │   ├── __init__.py
 │   ├── config.py
 │   ├── database.py
-│   ├── main-old.py
 │   ├── main.py
 │   ├── models.py
 │   ├── schemas.py
@@ -59,11 +58,20 @@
 │   │   │   ├── settings.py
 │   │   │   ├── sync.py
 │   │   │   └── utils.py
-│   │   └── common/
-│   │       ├── meta_cache.py
-│   │       ├── safety.py
-│   │       └── http/
-│   │           └── retry.py
+│   │   ├── common/
+│   │   │   ├── meta_cache.py
+│   │   │   ├── safety.py
+│   │   │   └── http/
+│   │   │       └── retry.py
+│   │   ├── mexc_common/
+│   │   │   └── http.py
+│   │   └── mexc_futures/
+│   │       ├── account.py
+│   │       ├── order_handler.py
+│   │       ├── positions.py
+│   │       ├── settings.py
+│   │       ├── sync.py
+│   │       └── utils.py
 │   ├── handlers/
 │   │   ├── __init__.py
 │   │   ├── order_verification_handler.py
@@ -84,6 +92,8 @@
 │   │   └── fm_guard.py
 │   ├── services/
 │   │   ├── __init__.py
+│   │   ├── metrics.py
+│   │   ├── quick_balance_helpers.py
 │   │   ├── referral_maintenance.py
 │   │   ├── referrals.py
 │   │   └── unrealized_sync.py
@@ -129,6 +139,7 @@
 │   │   └── panel.html
 │   └── utils/
 │       ├── __init__.py
+│       ├── exchange_loader-old-dismis.py
 │       ├── exchange_loader.py
 │       ├── exchange_validator.py
 │       ├── generate_hash.py
@@ -182,11 +193,15 @@
 │   ├── seed_demo_users.py
 │   └── zip_logger_backup.py
 └── tests/
+    ├── conftest.py
     ├── test_binance_testnet_smoke.py
     ├── test_bybit_server_time.py
     ├── test_bybit_testnet_smoke.py
+    ├── test_metrics.py
     ├── test_order_params.py
     ├── test_order_rules_unit.py
     ├── test_positions.py
+    ├── test_quick_balance.py
+    ├── test_quick_balance_helpers.py
     ├── test_trade_close.py
     └── test_trade_helpers.py

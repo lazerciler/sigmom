@@ -7,6 +7,7 @@ from typing import Optional, Callable, Any, Dict
 from app.config import settings
 from importlib import import_module
 import httpx
+from app.services.metrics import OverlayConfig, generate_ma_metrics
 
 router = APIRouter(prefix="/api/market", tags=["market"])
 
@@ -98,9 +99,12 @@ def _normalize(data):
     for r in data or []:
 
         if isinstance(r, (list, tuple)) and len(r) >= 5:
+            ts_raw = int(float(r[0]))
+            time_s = ts_raw // 1000 if ts_raw > 10**10 else ts_raw
             out.append(
                 {
-                    "t": int(r[0]),
+                    "t": ts_raw,
+                    "time": time_s,
                     "o": float(r[1]),
                     "h": float(r[2]),
                     "l": float(r[3]),
@@ -115,9 +119,12 @@ def _normalize(data):
             c = r.get("c") or r.get("close")
             if None in (t, o, h, low_v, c):
                 continue
+            ts_raw = int(float(t))
+            time_s = ts_raw // 1000 if ts_raw > 10**10 else ts_raw
             out.append(
                 {
-                    "t": int(t),
+                    "t": ts_raw,
+                    "time": time_s,
                     "o": float(o),
                     "h": float(h),
                     "l": float(low_v),
@@ -173,9 +180,29 @@ async def klines(
             j = r.json()
             # Parse: varsa borsa-özel parse_klines, yoksa generic normalize
             if callable(parse_klines):
-                parsed = parse_klines(j)
-                return parsed if parsed is not None else []
-            return _normalize(j)
+                data = parse_klines(j)
+                if data is None:
+                    data = []
+            else:
+                data = _normalize(j)
+
+            if not isinstance(data, list):
+                return data
+
+            config = OverlayConfig(
+                sma=settings.market_ma_sma_periods,
+                ema=settings.market_ma_ema_periods,
+            )
+            metrics = generate_ma_metrics(
+                data,
+                config,
+                tolerance_pct=settings.MARKET_MA_TOLERANCE_PCT,
+            )
+            return {
+                "items": data,
+                "ma_overlays": metrics.ma_overlays,
+                "ma_confluence": metrics.ma_confluence,
+            }
 
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Klines alınamadı: {e}")

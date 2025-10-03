@@ -366,11 +366,31 @@
     // === Polar (MA Konfluensi) ===
     let maChart = null; // singleton
     const POLAR_BG = {
-        // MA 99, MA 25, MA 7
-        light: ['rgba(251,191,36,0.50)', 'rgba(168,85,247,0.50)', 'rgba(59,130,246,0.50)'],
-        dark: ['rgba(245,158,11,0.55)', 'rgba(147,51,234,0.55)', 'rgba(59,130,246,0.55)']
+        light: [
+            'rgba(59,130,246,0.50)',
+            'rgba(168,85,247,0.50)',
+            'rgba(251,191,36,0.50)',
+            'rgba(16,185,129,0.50)',
+            'rgba(239,68,68,0.50)',
+        ],
+        dark: [
+            'rgba(96,165,250,0.55)',
+            'rgba(192,132,252,0.55)',
+            'rgba(245,158,11,0.55)',
+            'rgba(45,212,191,0.55)',
+            'rgba(248,113,113,0.55)',
+        ],
     };
     const POLAR_BORDER = (dark) => (dark ? '#0f172a' : '#e5e7eb');
+    const buildPolarColors = (count, dark) => {
+        const palette = POLAR_BG[dark ? 'dark' : 'light'];
+        if (!count) return [];
+        const colors = [];
+        for (let i = 0; i < count; i++) {
+            colors.push(palette[i % palette.length]);
+        }
+        return colors;
+    };
 
     function ensureMaChart() {
         const el = document.getElementById('maConfluence') || document.getElementById('maConfChart');
@@ -395,13 +415,13 @@
         maChart = new Chart(el.getContext('2d'), {
             type: 'polarArea',
             data: {
-                labels: ['7↔25', '25↔99', '7↔99'],
+                labels: [],
                 datasets: [{
-                    data: [0, 0, 0],
-                    backgroundColor: POLAR_BG[dark ? 'dark' : 'light'],
+                    data: [],
+                    backgroundColor: buildPolarColors(0, dark),
                     borderColor: POLAR_BORDER(dark),
                     borderWidth: 1.5,
-                    hoverBackgroundColor: POLAR_BG[dark ? 'dark' : 'light']
+                    hoverBackgroundColor: buildPolarColors(0, dark)
                 }]
             },
             options: {
@@ -458,113 +478,80 @@
         r.angleLines.color = dark ? 'rgba(148,163,184,.22)' : 'rgba(100,116,139,.22)';
         const ds = maChart.data?.datasets?.[0];
         if (ds) {
-            ds.backgroundColor = POLAR_BG[dark ? 'dark' : 'light'];
-            ds.hoverBackgroundColor = ds.backgroundColor;
+            const len = Array.isArray(ds.data) ? ds.data.length : 0;
+            const colors = buildPolarColors(len, dark);
+            ds.backgroundColor = colors;
+            ds.hoverBackgroundColor = colors;
             ds.borderColor = POLAR_BORDER(dark);
             ds.borderWidth = 1.5;
         }
         maChart.update('none');
     }
-    const CONF_THRESH_PCT = 1.5; // diff fiyatın %1.5’i → 100 yakınlık
 
-    function closenessPct(a, b, price, tol = CONF_THRESH_PCT) {
-        if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(price) || price <= 0) return 0;
-        const diffPct = Math.abs(a - b) / price * 100;
-        return Math.max(0, Math.min(100, 100 * (1 - diffPct / tol)));
+    function normalizeOverlayPoints(points) {
+        if (!Array.isArray(points)) return [];
+        return points.map((pt) => {
+            const rawTime = Number(pt?.time ?? pt?.t);
+            const rawValue = Number(pt?.value ?? pt?.v ?? pt?.y);
+            if (!Number.isFinite(rawTime) || !Number.isFinite(rawValue)) return null;
+            const time = rawTime > 1e10 ? Math.floor(rawTime / 1000) : Math.floor(rawTime);
+            return {
+                time,
+                value: rawValue
+            };
+        }).filter(Boolean);
     }
 
-    function updateMaConfluence(series) {
-        const ch = ensureMaChart();
-        if (!ch) return;
-        if (!Array.isArray(series) || series.length < 2) {
-            ch.data.datasets[0].data = [0, 0, 0];
-            ch.update('none');
-            return;
-        }
-        // Kapanmış son bar
-        const idx = Math.max(0, series.length - 2);
-        const closes = series.map(b => b.close);
-        const sma7 = sma(closes, 7)[idx];
-        const sma25 = sma(closes, 25)[idx];
-        const ema99 = ema(closes, 99)[idx];
-        const px = series[idx].close;
-        const d1 = closenessPct(sma7, sma25, px);
-        const d2 = closenessPct(sma25, ema99, px);
-        const d3 = closenessPct(sma7, ema99, px);
-        ch.data.datasets[0].data = [d1, d2, d3].map(v => Math.round(v)); // tam sayıya yuvarla
-        // Sabit şeffaf renkler
-        const dark = isDark();
-        ch.data.datasets[0].backgroundColor = POLAR_BG[dark ? 'dark' : 'light'];
-        ch.data.datasets[0].hoverBackgroundColor = ch.data.datasets[0].backgroundColor;
-        ch.data.datasets[0].borderColor = POLAR_BORDER(dark);
-        ch.data.datasets[0].borderWidth = 1.5;
-        ch.update('none');
-    }
-    // --------------------------------------------------------------
-
-    // Basit hareketli ortalama
-    function sma(values, period) {
-        const out = Array(values.length).fill(null);
-        let sum = 0;
-        for (let i = 0; i < values.length; i++) {
-            sum += values[i];
-            if (i >= period) sum -= values[i - period];
-            if (i >= period - 1) out[i] = sum / period;
-        }
-        return out;
-    }
-
-    // Üssel hareketli ortalama
-    function ema(values, period) {
-        const out = Array(values.length).fill(null);
-        const k = 2 / (period + 1);
-        let prev = null;
-        for (let i = 0; i < values.length; i++) {
-            const v = values[i];
-            if (i === period - 1) {
-                // ilk EMA'yı SMA ile başlat
-                let s = 0;
-                for (let j = 0; j < period; j++) s += values[j];
-                prev = s / period;
-                out[i] = prev;
-            } else if (i >= period) {
-                prev = v * k + prev * (1 - k);
-                out[i] = prev;
+    function applyMaOverlays(seriesMap = {}) {
+        const entries = Object.entries(seriesMap || {});
+        const activeKeys = new Set(entries.map(([key]) => key));
+        Object.entries(MA).forEach(([key, line]) => {
+            if (!activeKeys.has(key)) {
+                try {
+                    line.setData([]);
+                } catch {}
             }
-        }
-        return out;
-    }
-
-    // Candlestick datasından MA serileri üret
-    function buildMAData(klSeries, arrValues) {
-        const times = klSeries.map(b => b.time);
-        return arrValues.map((v, i) => (v == null ? null : {
-            time: times[i],
-            value: v
-        })).filter(Boolean);
-    }
-
-    function updateMAOverlays(klSeries, config = {
-        sma: [20],
-        ema: []
-    }) {
-        const closes = klSeries.map(b => b.close);
-        const keys = [
-            ...(config.sma || []).map(p => `SMA${p}`),
-            ...(config.ema || []).map(p => `EMA${p}`),
-        ];
-        keys.forEach((key, idx) => {
-            const p = Number(key.replace(/^\D+/, ''));
-            const arr = key.startsWith('SMA') ? sma(closes, p) : ema(closes, p);
-            ensureLine(key, idx).setData(buildMAData(klSeries, arr));
+        });
+        entries.forEach(([key, arr], idx) => {
+            const line = ensureLine(key, idx);
+            line.setData(normalizeOverlayPoints(arr));
         });
     }
 
-    // Varsayılan katmanlar (istediğin gibi değiştir)
-    const MA_CONFIG = {
-        sma: [7, 25],
-        ema: [99]
-    };
+    function applyMaConfluence(payload) {
+        const ch = ensureMaChart();
+        if (!ch) return;
+        const labels = Array.isArray(payload?.labels) && payload.labels.length ?
+            payload.labels :
+            Array.isArray(payload?.pairs) ? payload.pairs.map(p => p.label).filter(Boolean) : [];
+        const values = Array.isArray(payload?.values) ? payload.values : [];
+        ch.data.labels = labels;
+        const ds = ch.data.datasets[0];
+        const data = values.map((val) => {
+            const num = Number(val);
+            if (!Number.isFinite(num)) return 0;
+            return Math.max(0, Math.min(100, Math.round(num)));
+        });
+        ds.data = data;
+        const dark = isDark();
+        const colors = buildPolarColors(data.length, dark);
+        ds.backgroundColor = colors;
+        ds.hoverBackgroundColor = colors;
+        ds.borderColor = POLAR_BORDER(dark);
+        ds.borderWidth = 1.5;
+        ch.update('none');
+        const lblEl = document.getElementById('maConfluenceLbl');
+        if (lblEl) {
+            const baseText = labels.length ? `${labels.join(', ')} yakınlık (%)` : 'MA kombinasyon yakınlığı (%)';
+            const rawTime = Number(payload?.time ?? payload?.timestamp);
+            if (Number.isFinite(rawTime)) {
+                const ms = rawTime > 1e10 ? rawTime : rawTime * 1000;
+                lblEl.textContent = `${baseText} · ${fmtDateUTC(ms)} kapanışı`;
+            } else {
+                lblEl.textContent = baseText;
+            }
+        }
+    }
 
     // ==== grafik ====
     const chartEl = document.getElementById('chart');
@@ -706,6 +693,57 @@
         '1d': 86400
     };
 
+    // Sunucu varsayılanı (panel.html kök tag'inde data-default-exchange ile gelir)
+    const SERVER_DEFAULT_EXCHANGE =
+        document.documentElement.getAttribute('data-default-exchange') || '';
+
+    // --- Etkin borsayı backend'den izleyip değişince sayfayı yenile ---
+    let LAST_KNOWN_EXCHANGE = SERVER_DEFAULT_EXCHANGE;
+    async function pollExchangeStatusAndRefresh() {
+        try {
+            const r = await fetch('/api/me/panel/status', {
+                cache: 'no-store',
+                credentials: 'include'
+            });
+            if (!r.ok) return;
+            const j = await r.json();
+            const ex = (j && j.exchange) ? String(j.exchange) : '';
+            if (ex && ex !== LAST_KNOWN_EXCHANGE) {
+                // Değişiklik tespit edildi → sert yenile (tüm cache ve state temizlensin)
+                window.location.reload();
+                // Eşitse bile yerel durumu güncel tutalım
+                if (ex) LAST_KNOWN_EXCHANGE = ex;
+            }
+        } catch {
+            /* sessiz geç */
+        }
+    }
+    document.addEventListener('DOMContentLoaded', () => {
+        // 2–5 sn arası makul; burada 3000ms kullandım
+        setInterval(pollExchangeStatusAndRefresh, 3000);
+    });
+
+
+    // Panelde kullanıcı seçimi yok → her zaman server’ın varsayılanını kullan
+    function getSelectedExchange() {
+        // poller ile gelen değer öncelikli
+        if (LAST_KNOWN_EXCHANGE) return LAST_KNOWN_EXCHANGE;
+        if (SERVER_DEFAULT_EXCHANGE) return SERVER_DEFAULT_EXCHANGE;
+        // (son çare) açık pozisyonlardan tahmin
+        try {
+            const row = (Array.isArray(OPEN_TRADES_CACHE) ? OPEN_TRADES_CACHE : [])[0];
+            return row?.exchange || '';
+        } catch {
+            return '';
+        }
+    }
+
+
+    // --- NEW: merkezi olay dinleyici ---
+    window.addEventListener('exchange:changed', async () => {
+        await refreshAllAfterExchangeChange();
+    });
+
     async function bootstrapActiveSymbol() {
         // 0) UI select’i hazırla (bir kez)
         try {
@@ -714,7 +752,8 @@
 
         // 1) Açık pozisyonlardan seç
         try {
-            const r = await fetch('/api/me/open-trades', {
+            //            const r = await fetch('/api/me/open-trades', {
+            const r = await fetch('/api/me/open-trades?exchange=' + encodeURIComponent(getSelectedExchange()), {
                 credentials: 'include',
                 headers: {
                     'Accept': 'application/json'
@@ -733,7 +772,8 @@
         } catch {}
         // 2) Son işlemden seç
         try {
-            const r2 = await fetch('/api/me/recent-trades?limit=1', {
+            //            const r2 = await fetch('/api/me/recent-trades?limit=1&exchange=' + encodeURIComponent(getSelectedExchange()), {
+            const r2 = await fetch('/api/me/recent-trades?limit=1&exchange=' + encodeURIComponent(getSelectedExchange()), {
                 credentials: 'include',
                 headers: {
                     'Accept': 'application/json'
@@ -771,7 +811,8 @@
         if (!el) return;
         try {
             // Sunucudan mevcut semboller (açık + kapanmış işlemlerden)  → options
-            const r = await fetch('/api/me/symbols', {
+            //            const r = await fetch('/api/me/symbols', {
+            const r = await fetch('/api/me/symbols?exchange=' + encodeURIComponent(getSelectedExchange()), {
                 credentials: 'include'
             });
             const j = r.ok ? await r.json() : {
@@ -836,7 +877,7 @@
         let symbols = [DEFAULT_SYMBOL];
         // Üstüne SADECE açık pozisyon sembollerini ekle
         try {
-            const r = await fetch('/api/me/open-trades', {
+            const r = await fetch('/api/me/open-trades?exchange=' + encodeURIComponent(getSelectedExchange()), {
                 credentials: 'include',
                 headers: {
                     'Accept': 'application/json'
@@ -891,7 +932,6 @@
 
     // --- one_way vs hedge: L/S görünürlüğünü yöneten yardımcılar ---
     async function fetchPositionMode(symbol) {
-        // /api/me/unrealized?symbol=SYMBOL → { mode: 'one_way'|'hedge', ... }
         try {
             const qs = new URLSearchParams({
                 symbol: String(symbol || '').toUpperCase()
@@ -943,7 +983,8 @@
         // 1) /api/me/symbols → tüm bilinen semboller
         let list = [];
         try {
-            const r = await fetch('/api/me/symbols', {
+            const ex = getSelectedExchange();
+            const r = await fetch('/api/me/symbols?exchange=' + encodeURIComponent(ex), {
                 headers: {
                     'Accept': 'application/json'
                 }
@@ -956,7 +997,8 @@
 
         // 2) Açık pozisyon varsa onları da ekle (çevik UX)
         try {
-            const r2 = await fetch('/api/me/open-trades', {
+            const ex2 = getSelectedExchange();
+            const r2 = await fetch('/api/me/open-trades?exchange=' + encodeURIComponent(ex2), {
                 credentials: 'include',
                 headers: {
                     'Accept': 'application/json'
@@ -1146,68 +1188,91 @@
     };
 
     // ==== market verisi ====
-    async function loadKlines({
-        symbol = getCurrentSymbol(),
-        tf = klTf,
-        limit = klLimit
-    } = {}) {
+    async function loadKlines(opts = {}) {
+        if (typeof opts === 'string') {
+            opts = {
+                symbol: opts,
+                tf: arguments[1],
+                limit: arguments[2]
+            };
+        }
+        const {
+            symbol: sym = getCurrentSymbol(),
+            tf = klTf,
+            limit = klLimit
+        } = opts || {};
         try {
             // Boş sembolde API'yi hiç çağırma → 422 spam’ı durdur
-            if (!symbol) {
+            if (!sym) {
                 lastApiOkAt = 0;
                 lastApiErrAt = 0;
                 updateFeedStatus();
                 return [];
             }
             if (!candle) return []; // grafik kurulmadıysa sessizce çık
-            const r = await fetch(`/api/market/klines?symbol=${symbol}&tf=${tf}&limit=${limit}`, {
+            const qs = new URLSearchParams({
+                symbol: sym,
+                tf,
+                limit
+            });
+            // Her zaman seçili borsayı gönder
+            const ex = getSelectedExchange();
+            if (ex) qs.set('ex', ex);
+            const r = await fetch('/api/market/klines?' + qs.toString(), {
                 headers: {
                     'Accept': 'application/json'
                 }
             });
             if (!r.ok) throw new Error('no api');
             const data = await r.json();
-            const rows = Array.isArray(data) ? data : data.items || [];
+            const payload = Array.isArray(data) ? {
+                items: data
+            } : (data || {});
+            const rows = Array.isArray(payload.items) ? payload.items : [];
+            const overlays = payload.ma_overlays || {};
+            const confluence = payload.ma_confluence || null;
             const series = rows.map(row => {
+                let rawTime;
+                let open;
+                let high;
+                let low;
+                let close;
                 if (Array.isArray(row)) {
-                    const ts = Math.floor((row[0] ?? row.t) / 1000);
-                    return {
-                        time: ts,
-                        open: +row[1],
-                        high: +row[2],
-                        low: +row[3],
-                        close: +row[4]
-                    };
-                } else {
-                    const ts = Math.floor((row.t ?? row.ts) / 1000);
-                    return {
-                        time: ts,
-                        open: +row.o,
-                        high: +row.h,
-                        low: +row.l,
-                        close: +row.c
-                    };
+                    rawTime = Number(row[0]);
+                    open = Number(row[1]);
+                    high = Number(row[2]);
+                    low = Number(row[3]);
+                    close = Number(row[4]);
+                } else if (row && typeof row === 'object') {
+                    rawTime = Number(row.time ?? row.t ?? row.ts);
+                    open = Number(row.open ?? row.o);
+                    high = Number(row.high ?? row.h);
+                    low = Number(row.low ?? row.l);
+                    close = Number(row.close ?? row.c);
                 }
-            });
+                if (!Number.isFinite(rawTime) || !Number.isFinite(open) || !Number.isFinite(high) || !Number.isFinite(low) || !Number.isFinite(close)) {
+                    return null;
+                }
+                const time = rawTime > 1e10 ? Math.floor(rawTime / 1000) : Math.floor(rawTime);
+                return {
+                    time,
+                    open,
+                    high,
+                    low,
+                    close
+                };
+            }).filter(Boolean);
 
             if (series.length) {
                 klTimes = series.map(s => s.time); // seriden gelen bar zamanları
 
                 // Grafik verisini bas
                 candle.setData(series);
-                // MA overlay: kapanmış barlar üzerinden hesapla (son bar hariç → daha stabil)
-                if (series.length > 1) {
-                    // MA overlay: kapanmış barlar
-                    updateMAOverlays(series.slice(0, -1), MA_CONFIG);
-                } else {
-                    try {
-                        Object.values(MA).forEach(s => s.setData([]));
-                    } catch {}
-                }
+                applyMaOverlays(overlays);
                 // Sağ karttaki MA konfluensi (yalnızca kart ve Chart.js varsa)
                 if (document.getElementById('maConfluence') && window.Chart) {
                     try {
-                        updateMaConfluence(series);
+                        applyMaConfluence(confluence || {});
                     } catch {}
                 }
 
@@ -1236,6 +1301,14 @@
                 }
                 seriesLastTime = lastTime;
                 updateJumpBtnVisibility();
+            }
+            if (!series.length) {
+                try {
+                    applyMaOverlays(overlays);
+                    if (document.getElementById('maConfluence') && window.Chart) {
+                        applyMaConfluence(confluence || {});
+                    }
+                } catch {}
             }
             // Başarılı okuma → "Veri durumu" güncelle
             lastApiOkAt = Date.now();
@@ -1272,6 +1345,8 @@
             const q = new URLSearchParams({
                 tf: klTf
             });
+            const ex = getSelectedExchange();
+            q.set('exchange', ex);
             const r = await fetch('/api/me/markers?' + q.toString(), {
                 credentials: 'include'
             });
@@ -1368,7 +1443,8 @@
         tf = tf || klTf;
         try {
             if (!candle || !symbol) return [];
-            const url = `/api/me/markers?symbol=${encodeURIComponent(symbol)}&tf=${encodeURIComponent(tf)}`;
+            const ex = getSelectedExchange();
+            const url = `/api/me/markers?symbol=${encodeURIComponent(symbol)}&tf=${encodeURIComponent(tf)}&exchange=${encodeURIComponent(ex)}`;
             const res = await fetch(url, {
                 credentials: 'include',
                 cache: 'no-store'
@@ -1459,7 +1535,8 @@
     async function loadOpenTrades() {
         try {
             // cache: 'no-store' → tarayıcı önbelleğini baypas et, eksiltmeler anında gelsin
-            const res = await fetch(`/api/me/open-trades?limit=${RECENT_TRADES_LIMIT}`, {
+            const ex = getSelectedExchange();
+            const res = await fetch(`/api/me/open-trades?limit=${RECENT_TRADES_LIMIT}&exchange=${encodeURIComponent(ex)}`, {
                 credentials: 'include',
                 cache: 'no-store',
                 headers: {
@@ -1570,9 +1647,6 @@
                 row.append(
                     $div('text-xs', t.symbol),
                     $div(sideCls, side),
-                    // Miktar: küçük değerlerde 6 hane, büyüklerde 3
-                    // $div('text-xs', fmtQty(t.position_size ?? t.size)),
-
                     // Miktar: varsa backend’in metni (0.120 vb.), yoksa eski formatter
                     $div('text-xs', t.position_size_text ?? fmtQty(t.position_size ?? t.size)),
                     $div('text-xs', fmtPrice(t.entry_price)),
@@ -1665,7 +1739,8 @@
     async function loadRecentTrades() {
         try {
             // Kapamalar için de cache’i kapatalım
-            const res = await fetch(`/api/me/recent-trades?limit=${RECENT_TRADES_LIMIT}`, {
+            const ex = getSelectedExchange();
+            const res = await fetch(`/api/me/recent-trades?limit=${RECENT_TRADES_LIMIT}&exchange=${encodeURIComponent(ex)}`, {
                 credentials: 'include',
                 cache: 'no-store',
                 headers: {
@@ -1751,7 +1826,8 @@
     // ==== genel özet ====
     async function loadOverview() {
         try {
-            const r = await fetch('/api/me/overview', {
+            const ex = getSelectedExchange();
+            const r = await fetch('/api/me/overview?exchange=' + encodeURIComponent(ex), {
                 headers: {
                     'Accept': 'application/json'
                 }
@@ -1798,9 +1874,9 @@
     }
 
     async function loadSymbols() {
-        // doğru endpoint: /api/me/symbols  (parametresiz)
         try {
-            const r = await fetch('/api/me/symbols', {
+            const ex = getSelectedExchange();
+            const r = await fetch('/api/me/symbols?exchange=' + encodeURIComponent(ex), {
                 credentials: 'include'
             });
             if (!r.ok) return [];
@@ -1848,8 +1924,6 @@
 
     // ==== çalıştır ====
     // İlk açılışta mevcut TF’yi işaretle
-    //  highlightActiveTf(klTf);
-    //  makeChart();
     highlightActiveTf(klTf);
     makeChart(); // grafik burada bir kez kuruluyor
     (async () => {
@@ -1857,7 +1931,6 @@
         const qp = new URLSearchParams(location.search);
         const fromUrl = qp.get('symbol');
         const known = await loadSymbols();
-        //    const bootSym = await bootstrapActiveSymbol();     // /api/me/open-trades → /api/me/recent-trades → picker
         const bootSym = await bootstrapActiveSymbol(); // picker'ı da burada doldurur
         const latest = await getLatestMarkerSymbol(); // canlı marker varsa
         let initial = (fromUrl && fromUrl.toUpperCase()) ||
@@ -1893,7 +1966,6 @@
                     await autoSwitchSymbolIfNeeded();
                     // küçük jitter (±150ms) → eşzamanlı sekmeler backend’e aynı anda vurmasın
                     const j = Math.floor((Math.random() * 300) - 150);
-                    //await new Promise(r => setTimeout(r, Math.max(0, j)));
                     if (j > 0) await new Promise(r => setTimeout(r, j));
                     await loadKlines({
                         symbol: activeSymbol,
@@ -1935,12 +2007,6 @@
             });
         });
 
-        // Güvenli sayı çevirici (net toplarken ve son kapananda kullanılıyor)
-        const safeNum = (v) => {
-            const n = Number(v);
-            return Number.isFinite(n) ? n : 0;
-        };
-
         // Aktif sembolün borsasını açık pozisyonlardan bul (modüler)
         function getActiveExchange(sym) {
             try {
@@ -1949,125 +2015,6 @@
             } catch {
                 return null;
             }
-        }
-        // uPnL payload'ından (list ya da tekil) verilen sembol için tüm bacakları topla
-        function extractUpnl(payload, symbol) {
-            const SYM = String(symbol || '').toUpperCase();
-            // Tekil sayısal alanlar
-            if (typeof payload === 'number') return payload;
-            if (payload && Number.isFinite(+payload.unrealized)) return +payload.unrealized;
-            if (payload && Number.isFinite(+payload.upnl)) return +payload.upnl;
-            const arr = Array.isArray(payload) ? payload :
-                (payload?.items || payload?.positions || []);
-            if (!Array.isArray(arr)) return 0;
-            let sum = 0;
-            for (const p of arr) {
-                const psym = String(p?.symbol || p?.s || '').toUpperCase();
-                if (SYM && psym && psym !== SYM) continue;
-                // doğrudan uPnL alanları
-                let u = p?.unrealized ?? p?.unRealizedProfit ?? p?.unrealizedPnl ?? p?.upnl ?? p?.pnl;
-                if (u != null && u !== '') {
-                    sum += +u;
-                    continue;
-                }
-                // türet: entry/mark/qty
-                const qty = +((p?.positionAmt ?? p?.qty ?? p?.size) || 0);
-                const entry = +((p?.entryPrice ?? p?.avgPrice ?? p?.entry) || 0);
-                const mark = +((p?.markPrice ?? p?.price ?? 0));
-                if (qty && entry && mark) {
-                    const abs = Math.abs(qty);
-                    sum += (qty > 0) ? (mark - entry) * abs // LONG
-                        :
-                        (entry - mark) * abs; // SHORT
-                }
-            }
-            return sum;
-        }
-
-        // Hedge: LONG/SHORT kırılımını çıkar (liste varsa doğrudan, aggregate ise açık bacağın yönüne paylaştır)
-        function extractUpnlBySide(payload, symbol, openRowsForActive = []) {
-            const SYM = String(symbol || '').toUpperCase();
-            const out = {
-                long: 0,
-                short: 0,
-                hasLong: false,
-                hasShort: false
-            };
-            // (0) Yeni backend şekli: { unrealized, legs: { long, short }, mode }
-            if (payload && payload.legs && typeof payload.legs === 'object') {
-                const L = Number(payload.legs.long ?? 0);
-                const S = Number(payload.legs.short ?? 0);
-                out.long = Number.isFinite(L) ? L : 0;
-                out.short = Number.isFinite(S) ? S : 0;
-                // Satırı gizlememek için: değer 0 olsa bile ilgili bacakta açık pozisyon varsa görünür kalsın
-                const hasLongOpen = (openRowsForActive || []).some(r => String(r?.side || '').toLowerCase() === 'long');
-                const hasShortOpen = (openRowsForActive || []).some(r => String(r?.side || '').toLowerCase() === 'short');
-                // one_way/BOTH güvenlik ağı: legs 0 ise toplamı açık bacağın yönüne yaz
-                if (!out.long && !out.short && Number.isFinite(+payload.unrealized)) {
-                    if (hasLongOpen) {
-                        out.long = +payload.unrealized;
-                        out.hasLong = true;
-                    }
-                    if (hasShortOpen) {
-                        out.short = +payload.unrealized;
-                        out.hasShort = true;
-                    }
-                }
-                out.hasLong = hasLongOpen || out.long !== 0;
-                out.hasShort = hasShortOpen || out.short !== 0;
-                return out;
-            }
-
-            // 1) Liste (positions/items/array) ise tek tek tara
-            const arr = Array.isArray(payload) ? payload :
-                (payload?.items || payload?.positions || []);
-            if (Array.isArray(arr)) {
-                for (const p of arr) {
-                    const psym = String(p?.symbol || p?.s || '').toUpperCase();
-                    if (SYM && psym && psym !== SYM) continue;
-                    let u = p?.unrealized ?? p?.unRealizedProfit ?? p?.unrealizedPnl ?? p?.upnl ?? p?.pnl;
-                    if (u == null || u === '') {
-                        const qty = +((p?.positionAmt ?? p?.qty ?? p?.size) || 0);
-                        const entry = +((p?.entryPrice ?? p?.avgPrice ?? p?.entry) || 0);
-                        const mark = +((p?.markPrice ?? p?.price ?? 0));
-                        if (qty && entry && mark) {
-                            const abs = Math.abs(qty);
-                            u = (qty > 0) ? (mark - entry) * abs : (entry - mark) * abs;
-                        } else {
-                            u = 0;
-                        }
-                    }
-                    let side = String(p?.side || '').toLowerCase();
-                    if (!side) {
-                        const qty = +((p?.positionAmt ?? p?.qty ?? p?.size) || 0);
-                        side = qty < 0 ? 'short' : (qty > 0 ? 'long' : '');
-                    }
-                    if (side === 'short') {
-                        out.short += +u;
-                        out.hasShort = true;
-                    } else {
-                        out.long += +u;
-                        out.hasLong = true;
-                    }
-                }
-                return out;
-            }
-            // 2) Aggregate sayı ise: aktif açık kayıtlardan bacak yönünü bul ve ona yaz
-            const agg = (typeof payload === 'number') ?
-                +payload :
-                (Number.isFinite(+payload?.unrealized) ? +payload.unrealized :
-                    (Number.isFinite(+payload?.upnl) ? +payload.upnl : 0));
-            if (!Number.isFinite(agg) || agg === 0) return out;
-            const cand = (openRowsForActive || []).find(Boolean);
-            const side = String(cand?.side || '').toLowerCase();
-            if (side === 'short') {
-                out.short = agg;
-                out.hasShort = true;
-            } else {
-                out.long = agg;
-                out.hasLong = true;
-            }
-            return out;
         }
 
         // Kart yalnız Asil üye'de HTML'a basılıyor; bu yüzden sadece DOM varlığına bakmak yeterli.
@@ -2083,274 +2030,85 @@
         const elLast = document.getElementById('qb-last');
 
         if (!elNet || !elOpen || !elLast) return;
-        // Öncelikli alan: realized_pnl; diğer isimler olursa temkinli fallback
-        const pickPnl = (t) => (
-            t?.realized_pnl ??
-            t?.realized_pnl_usd ??
-            t?.pnl_usdt ??
-            t?.pnl ??
-            0
-        );
-
-        async function loadQuickBalance(opts) {
-            const silent = true; // manuel yenile kaldırıldı → hep sessiz
-            // Aktif sembol henüz belirlenmediyse ilk yüklemeyi beklet
+        async function loadQuickBalance() {
             if (!activeSymbol) return;
             // SYM'i fonksiyon seviyesinde tanımla: aşağıda ve catch dışında da kullanılıyor
             const SYM = String(activeSymbol).toUpperCase();
             try {
-                /* manuel durum mesajları kaldırıldı */
-
-                // 1) Net PnL (önce /netpnl, olmazsa /recent-trades toplamı)
-                let net = 0,
-                    lastText = '—';
-                let lastView = null; // {sym, side, sign, lpnl, ts, pnlCls}
-                // a) /api/me/netpnl – backend “ilk emrin tarihinden” aralığı kendi belirler
-                try {
-                    const qsNet = new URLSearchParams();
-                    const exForNet = getActiveExchange(activeSymbol);
-                    if (exForNet) qsNet.set('exchange', exForNet);
-                    if (activeSymbol) qsNet.set('symbol', String(activeSymbol).toUpperCase());
-                    const rNet = await fetch('/api/me/netpnl?' + qsNet.toString(), {
-                        credentials: 'include',
-                        headers: {
-                            'Accept': 'application/json'
-                        }
-                    });
-                    if (rNet.ok) {
-                        const jn = await rNet.json();
-                        // destek: { net: <num> } veya { net_pnl: <num> }
-                        const v = (jn && (jn.net ?? jn.net_pnl));
-                        if (typeof v === 'number') net = v;
+                const qs = new URLSearchParams({
+                    symbol: SYM
+                });
+                const ex = getSelectedExchange(activeSymbol);
+                if (ex) qs.set('exchange', ex);
+                const resp = await fetch('/api/me/quick-balance?' + qs.toString(), {
+                    credentials: 'include',
+                    cache: 'no-store',
+                    headers: {
+                        'Accept': 'application/json'
                     }
-                } catch {}
-                // b) Eğer /netpnl yoksa/0 geldiyse fallback: /recent-trades toplamı (+ son işlem bilgisi)
-                try {
-                    // Son işlemi göstermek için limit=1; toplam için limit geniş tut (1000)
-                    const qsSum = new URLSearchParams({
-                        limit: '1000'
-                    });
-                    if (activeSymbol) qsSum.set('symbol', String(activeSymbol).toUpperCase());
-                    const rSum = await fetch('/api/me/recent-trades?' + qsSum.toString(), {
-                        credentials: 'include',
-                        headers: {
-                            'Accept': 'application/json'
-                        }
-                    });
-                    if (rSum.ok) {
-                        const arr = await rSum.json();
-                        if (Array.isArray(arr) && arr.length) {
-                            // /netpnl değeri 0 ise DB toplamına düş
-                            if (!net) {
-                                let sum = 0;
-                                for (const t of arr) sum += safeNum(pickPnl(t));
-                                net = sum;
-                            }
-                            // “Son Kapanan” için yalnız ilk kayıt yeterli
-                            const last = arr[0];
-                            if (last) {
-                                const side = (last?.side || '').toString().toUpperCase();
-                                const sym = last?.symbol || '';
-                                const lpnl = safeNum(pickPnl(last));
-                                const sign = lpnl >= 0 ? '+' : '';
-                                const ts = fmtDateLocalShort(last?.timestamp);
-                                const pnlCls = lpnl > 0 ? 'text-emerald-500' :
-                                    (lpnl < 0 ? 'text-rose-400' : 'text-slate-400');
-                                lastView = {
-                                    sym,
-                                    side,
-                                    sign,
-                                    lpnl,
-                                    ts,
-                                    pnlCls
-                                };
-                                lastText = `${sym} ${side} · ${sign}${fmt2(lpnl)} · ${ts}`;
-                            }
-                        }
-                    }
-                } catch {}
-
-                // 2) Açık pozisyonlar — ÖNCE cache, boşsa fetch'e düş
-                let openRowsAll = Array.isArray(OPEN_TRADES_CACHE) ? OPEN_TRADES_CACHE : [];
-                let openCnt = openRowsAll.length;
-                if (openCnt === 0) {
-                    try {
-                        const r2 = await fetch(`/api/me/open-trades?limit=${RECENT_TRADES_LIMIT}`, {
-                            credentials: 'include',
-                            cache: 'no-store',
-                            headers: {
-                                'Accept': 'application/json'
-                            }
-                        });
-                        if (r2.ok) {
-                            const arr2 = await r2.json();
-                            if (Array.isArray(arr2)) {
-                                openRowsAll = arr2;
-                                openCnt = arr2.length;
-                            }
-                        }
-                    } catch {}
+                });
+                if (!resp.ok) throw new Error('http');
+                const data = await resp.json();
+                const netVal = Number(data?.net?.value ?? 0);
+                elNet.classList.remove('text-emerald-500', 'text-rose-400');
+                if (netVal > 0) elNet.classList.add('text-emerald-500');
+                else if (netVal < 0) elNet.classList.add('text-rose-400');
+                elNet.textContent = netVal === 0 ? '0' : (netVal > 0 ? '+' : '−') + fmt2(Math.abs(netVal));
+                const openCount = Number(data?.open_trade_count ?? 0);
+                elOpen.textContent = Number.isFinite(openCount) ? String(openCount) : '0';
+                const unreal = data?.unrealized || {};
+                const mode = String(unreal?.mode || '').toLowerCase();
+                if (mode === 'hedge' || mode === 'one_way') {
+                    LAST_POSITION_MODE = mode;
                 }
-
-                elNet.textContent = (Number(net) === 0 ? '0' : (net > 0 ? '+' : '−') + fmt2(Math.abs(Number(net))));
-                elOpen.textContent = String(openCnt);
-
-                if (openCnt > 0) {
-                    // Önce aynı çağrıdan gelen liste → sonra cache → en son tek yedek fetch
-                    let openRowsForActive = Array.isArray(openRowsAll) ?
-                        openRowsAll.filter(t =>
-                            String(t?.symbol || '').toUpperCase() === String(activeSymbol).toUpperCase()
-                        ) : [];
-                    if (!openRowsForActive.length && Array.isArray(OPEN_TRADES_CACHE) && OPEN_TRADES_CACHE.length) {
-                        openRowsForActive = OPEN_TRADES_CACHE.filter(t =>
-                            String(t?.symbol || '').toUpperCase() === String(activeSymbol).toUpperCase()
-                        );
+                const showSplit = Boolean(unreal?.show_split);
+                toggleUpnlSplitRows(showSplit);
+                try {
+                    updateModeChip(mode);
+                } catch {}
+                try {
+                    const lbl = document.getElementById('qb-upnl-long-label');
+                    const tip = document.getElementById('tt-upnl-l');
+                    if (lbl) lbl.textContent = showSplit ? 'Gerçekleşmemiş PnL (L)' : 'Gerçekleşmemiş PnL';
+                    if (tip) {
+                        tip.textContent = showSplit ?
+                            'Aktif sembolde long bacağın gerçekleşmemiş PnL değeri.' :
+                            'Aktif sembolde gerçekleşmemiş PnL (toplam).';
                     }
-                    // L/S kırılımı için başlangıç objesi (toplam yok; sıfır)
-                    let bd = {
-                        long: 0,
-                        short: 0,
-                        hasLong: false,
-                        hasShort: false
-                    };
-                    let lastPayload = null; // gerektiğinde toplamı çıkarmak için
-                    try {
-                        const ex = getActiveExchange(activeSymbol);
-                        // (a) Düz çağrı (legs dönerse burada yakalarız)
-                        let ju = null;
-                        const qs0 = new URLSearchParams({
-                            symbol: SYM
-                        });
-                        if (ex) qs0.set('exchange', ex);
-                        let rU = await fetch('/api/me/unrealized?' + qs0.toString(), {
-                            credentials: 'include',
-                            headers: {
-                                'Accept': 'application/json'
-                            }
-                        });
-                        if (rU.ok) {
-                            ju = await rU.json();
-                            bd = extractUpnlBySide(ju, SYM, openRowsForActive);
-                            lastPayload = ju;
-                        }
-                        // (b) Hâlâ L/S oluşmadıysa all=1'e düş
-                        if (!bd.hasLong && !bd.hasShort) {
-                            const qs2 = new URLSearchParams({
-                                symbol: SYM,
-                                all: '1'
-                            });
-                            if (ex) qs2.set('exchange', ex);
-                            rU = await fetch('/api/me/unrealized?' + qs2.toString(), {
-                                credentials: 'include',
-                                headers: {
-                                    'Accept': 'application/json'
-                                }
-                            });
-                            if (rU.ok) {
-                                ju = await rU.json();
-                                bd = extractUpnlBySide(ju, SYM, openRowsForActive);
-                                lastPayload = ju;
-                            }
-                        }
-                        // fallback: aggregate
-                        if (!bd.hasLong && !bd.hasShort) {
-                            const qsA = new URLSearchParams({
-                                symbol: SYM
-                            });
-                            if (ex) qsA.set('exchange', ex);
-                            const rA = await fetch('/api/me/unrealized?' + qsA.toString(), {
-                                credentials: 'include',
-                                headers: {
-                                    'Accept': 'application/json'
-                                }
-                            });
-                            if (rA.ok) {
-                                const jA = await rA.json();
-                                bd = extractUpnlBySide(jA, SYM, openRowsForActive);
-                                lastPayload = jA;
-                            }
-                        }
+                } catch {}
 
-                        // Hâlâ bacak tespit edilemediyse (ör. one_way + agg),
-                        // açık pozisyon satırından yönü çıkar ve toplamı o bacağa yaz.
-                        if (!bd.hasLong && !bd.hasShort && openRowsForActive.length) {
-                            const first = openRowsForActive[0];
-                            const qty = Number(first.positionAmt ?? first.position_size ?? first.size ?? 0);
-                            const sideFromOpen = String(first.side || (qty < 0 ? 'short' : 'long')).toLowerCase();
-                            const total = extractUpnl(lastPayload || 0, SYM);
-                            if (sideFromOpen === 'short') {
-                                bd.short = total;
-                                bd.hasShort = true;
-                            } else {
-                                bd.long = total;
-                                bd.hasLong = true;
-                            }
-                        }
-
-                    } catch (e) {}
-
-                    // Pozisyon modunu çek (hedge / one_way) ve L/S satırı görünürlüğünü ayarla
-                    let __mode = null;
-                    try {
-                        __mode = await fetchPositionMode(SYM);
-                    } catch {}
-                    // L/S satırları yalnızca hedge modda ve iki bacak da gerçekten varsa görünsün
-                    const __showSplit = (__mode === 'hedge') && !!(bd.hasLong && bd.hasShort);
-                    toggleUpnlSplitRows(__showSplit);
-                    try {
-                        updateModeChip(__mode);
-                    } catch {}
-
-                    // ——— uPnL label & tooltip metni (one_way → “Gerçekleşmemiş PnL”, hedge → “Gerçekleşmemiş PnL (L)”)
-                    try {
-                        const lbl = document.getElementById('qb-upnl-long-label');
-                        const tip = document.getElementById('tt-upnl-l');
-                        if (lbl) {
-                            lbl.textContent = __showSplit ? 'Gerçekleşmemiş PnL (L)' : 'Gerçekleşmemiş PnL';
-                        }
-                        if (tip) {
-                            tip.textContent = __showSplit ?
-                                'Aktif sembolde long bacağın gerçekleşmemiş PnL değeri.' :
-                                'Aktif sembolde gerçekleşmemiş PnL (toplam).';
-                        }
-                    } catch {}
-
-                    // Sadece L/S satırları (toplam yok) — tek bir yerden güncelle
-                    if (rowUpL && elUpL && rowUpS && elUpS) {
-                        if (__showSplit) {
-                            // HEDGE: bacakları ayrı ayrı yaz
-                            if (bd.hasLong) {
-                                const vL = Number(bd.long || 0);
-                                elUpL.classList.remove('text-emerald-500', 'text-rose-400');
-                                if (vL > 0) elUpL.classList.add('text-emerald-500');
-                                else if (vL < 0) elUpL.classList.add('text-rose-400');
-                                elUpL.textContent = (vL > 0 ? '+' : (vL < 0 ? '−' : '')) + nf2QB.format(Math.abs(vL));
-                                rowUpL.classList.remove('hidden');
-                            } else {
-                                rowUpL.classList.add('hidden');
-                            }
-                            if (bd.hasShort) {
-                                const vS = Number(bd.short || 0);
-                                elUpS.classList.remove('text-emerald-500', 'text-rose-400');
-                                if (vS > 0) elUpS.classList.add('text-emerald-500');
-                                else if (vS < 0) elUpS.classList.add('text-rose-400');
-                                elUpS.textContent = (vS > 0 ? '+' : (vS < 0 ? '−' : '')) + nf2QB.format(Math.abs(vS));
-                                rowUpS.classList.remove('hidden');
-                            } else {
-                                rowUpS.classList.add('hidden');
-                            }
-                        } else {
-                            // ONE-WAY: tek satırda TOPLAM unrealized (L satırı yeniden kullanılır)
-                            const totalUpnl = Number(bd.long || 0) + Number(bd.short || 0);
+                const longVal = Number(unreal?.long ?? 0);
+                const shortVal = Number(unreal?.short ?? 0);
+                const totalVal = Number(unreal?.total ?? (longVal + shortVal));
+                if (openCount > 0 && rowUpL && elUpL && rowUpS && elUpS) {
+                    if (showSplit) {
+                        if (unreal?.has_long || longVal !== 0) {
                             elUpL.classList.remove('text-emerald-500', 'text-rose-400');
-                            if (totalUpnl > 0) elUpL.classList.add('text-emerald-500');
-                            else if (totalUpnl < 0) elUpL.classList.add('text-rose-400');
-                            elUpL.textContent = (totalUpnl > 0 ? '+' : (totalUpnl < 0 ? '−' : '')) + nf2QB.format(Math.abs(totalUpnl));
+                            if (longVal > 0) elUpL.classList.add('text-emerald-500');
+                            else if (longVal < 0) elUpL.classList.add('text-rose-400');
+                            elUpL.textContent = (longVal > 0 ? '+' : (longVal < 0 ? '−' : '')) + nf2QB.format(Math.abs(longVal));
                             rowUpL.classList.remove('hidden');
+                        } else {
+                            rowUpL.classList.add('hidden');
+                        }
+                        if (unreal?.has_short || shortVal !== 0) {
+                            elUpS.classList.remove('text-emerald-500', 'text-rose-400');
+                            if (shortVal > 0) elUpS.classList.add('text-emerald-500');
+                            else if (shortVal < 0) elUpS.classList.add('text-rose-400');
+                            elUpS.textContent = (shortVal > 0 ? '+' : (shortVal < 0 ? '−' : '')) + nf2QB.format(Math.abs(shortVal));
+                            rowUpS.classList.remove('hidden');
+                        } else {
                             rowUpS.classList.add('hidden');
                         }
+                    } else {
+                        const totalUpnl = Number.isFinite(totalVal) ? totalVal : 0;
+                        elUpL.classList.remove('text-emerald-500', 'text-rose-400');
+                        if (totalUpnl > 0) elUpL.classList.add('text-emerald-500');
+                        else if (totalUpnl < 0) elUpL.classList.add('text-rose-400');
+                        elUpL.textContent = (totalUpnl > 0 ? '+' : (totalUpnl < 0 ? '−' : '')) + nf2QB.format(Math.abs(totalUpnl));
+                        rowUpL.classList.remove('hidden');
+                        rowUpS.classList.add('hidden');
                     }
-
                 } else {
                     if (elUpL) elUpL.textContent = '—';
                     if (elUpS) elUpS.textContent = '—';
@@ -2358,72 +2116,44 @@
                     if (rowUpS) rowUpS.classList.add('hidden');
                 }
 
-                if (lastView) {
-                    elLast.textContent = ''; // temizle
-                    elLast.append(
-                        document.createTextNode(`${lastView.sym} ${lastView.side} · `),
-                        (() => {
-                            const s = document.createElement('span');
-                            s.className = lastView.pnlCls;
-                            s.textContent = `${lastView.sign}${fmt2(lastView.lpnl)}`;
-                            return s;
-                        })(),
-                        document.createTextNode(` · ${lastView.ts}`)
-                    );
-                } else {
-                    elLast.textContent = lastText; // '—' veya fallback metin
-                }
-
-                // Net PnL Renk: + yeşil / - kırmızı
-                elNet.classList.remove('text-emerald-500', 'text-rose-400');
-                if (net > 0) elNet.classList.add('text-emerald-500');
-                else if (net < 0) elNet.classList.add('text-rose-400');
-
-                // Cüzdan: backend’den sembole & exchange’e göre
                 if (elWallet) {
-                    let shown = null;
-                    let isSim = false; // fallback mı?
-                    try {
-                        const ex = getActiveExchange(activeSymbol);
-                        const qs = new URLSearchParams({
-                            symbol: String(activeSymbol).toUpperCase()
-                        });
-                        if (ex) qs.set('exchange', ex);
-                        qs.set('_', Date.now().toString()); // cache-buster
-                        const r = await fetch('/api/me/balance?' + qs.toString(), {
-                            credentials: 'include',
-                            headers: {
-                                'Accept': 'application/json',
-                                'Cache-Control': 'no-store'
-                            },
-                            cache: 'no-store'
-                        });
-                        if (r.ok) {
-                            const j = await r.json();
-                            shown = Number(j?.available ?? j?.balance);
-                        }
-                    } catch {}
-                    // Fallback: API ok değilse simülasyona düş → status=err göster
-                    if (!Number.isFinite(shown)) {
-                        if (!silent) showStatus('Bağlantı yok (simülasyon)', 'err');
-                        const START_CAP = (typeof window.START_CAPITAL === 'number') ? window.START_CAPITAL : 1000;
-                        shown = START_CAP + (Number(net) || 0);
-                        isSim = true;
-                    } else {
-                        // gerçek bakiye → nötr renk
-                        //            elWallet.classList.remove('text-emerald-500','text-rose-400');
-                        // gerçek bakiye
-                    }
-                    // Renk ve metin: gerçek → nötr, simülasyon → gri + "≈"
+                    const wallet = data?.wallet || {};
+                    const walletAmount = Number(wallet?.amount ?? 0);
+                    const approx = Boolean(wallet?.approximate);
                     elWallet.classList.remove('text-emerald-500', 'text-rose-400', 'text-slate-400');
-                    if (isSim) elWallet.classList.add('text-slate-400');
-                    elWallet.textContent = (isSim ? '≈ ' : '') + fmt2(shown || 0);
-                    elWallet.title = isSim ?
-                        'Canlı güncelleme başarısız' //'Simülasyon (balance API başarısız): START_CAPITAL + Net PnL'
-                        :
-                        'Aktif cüzdan bakiyesi';
+                    if (approx) elWallet.classList.add('text-slate-400');
+                    elWallet.textContent = (approx ? '≈ ' : '') + fmt2(walletAmount);
+                    if (wallet?.note) elWallet.title = wallet.note;
+                    else if (approx) elWallet.title = 'Simüle bakiye';
+                    else elWallet.title = 'Aktif cüzdan bakiyesi';
                 }
-            } catch {}
+
+                if (elLast) {
+                    const last = data?.last_trade;
+                    if (last && last.symbol) {
+                        const side = String(last.side || '').toUpperCase();
+                        const pnlVal = Number(last.pnl ?? 0);
+                        const pnlAbs = Number(last.pnl_abs ?? Math.abs(pnlVal));
+                        const sign = last.pnl_sign || (pnlVal > 0 ? '+' : (pnlVal < 0 ? '−' : ''));
+                        const ts = last.timestamp ? fmtDateLocalShort(last.timestamp) : '—';
+                        elLast.textContent = '';
+                        elLast.append(
+                            document.createTextNode(`${last.symbol} ${side} · `),
+                            (() => {
+                                const span = document.createElement('span');
+                                span.className = pnlVal > 0 ? 'text-emerald-500' : (pnlVal < 0 ? 'text-rose-400' : 'text-slate-400');
+                                span.textContent = `${sign}${fmt2(pnlAbs)}`;
+                                return span;
+                            })(),
+                            document.createTextNode(` · ${ts}`)
+                        );
+                    } else {
+                        elLast.textContent = '—';
+                    }
+                }
+            } catch (err) {
+                console.warn('quick balance refresh failed', err);
+            }
         }
         // Açık pozisyon push sinyali geldiğinde sessiz güncelle
         document.addEventListener('sig:open-trades', () => loadQuickBalance({
