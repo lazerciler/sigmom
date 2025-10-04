@@ -25,6 +25,8 @@ async def arequest_with_retry(
     retry_on_network: bool = True,
     retry_on_binance_1021: bool = False,
     rebuild_async: Optional[RebuildAsync] = None,
+    #  ) -> httpx.Response:
+    **request_kwargs,  # json, data, content, params vb.
 ) -> httpx.Response:
     """
     Sadece güvenli senaryolarda retry yapar:
@@ -37,8 +39,11 @@ async def arequest_with_retry(
 
     while True:
         try:
+            # resp = await client.request(
+            #     method, cur_url, headers=cur_headers, timeout=timeout
+            # )
             resp = await client.request(
-                method, cur_url, headers=cur_headers, timeout=timeout
+                method, cur_url, headers=cur_headers, timeout=timeout, **request_kwargs
             )
             if retry_on_5xx and 500 <= resp.status_code < 600 and attempt < max_retries:
                 attempt += 1

@@ -13,12 +13,15 @@ from app.config import settings
 from app.utils.exchange_loader import load_execution_module
 import importlib
 import inspect
-from pydantic import BaseModel
+
+# from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import StrategyOpenTrade, StrategyTrade, RawSignal
+from app.services.entry_lines_helpers import calculate_entry_lines
 from app.services.quick_balance_helpers import (
     DEFAULT_BALANCE_FALLBACK,
     call_get_unrealized,
@@ -60,6 +63,11 @@ class Marker(BaseModel):
     is_live: Optional[bool] = None
 
 
+class EntryLinesOut(BaseModel):
+    long: Optional[float] = None
+    short: Optional[float] = None
+
+
 class OpenTradeOut(BaseModel):
     public_id: str
     symbol: str
@@ -96,6 +104,11 @@ class RawSignalLite(BaseModel):
     symbol: Optional[str] = None
     side: Optional[str] = None
     mode: Optional[str] = None
+
+
+class OpenTradesResponse(BaseModel):
+    items: List[OpenTradeOut]
+    entry_lines: EntryLinesOut = Field(default_factory=EntryLinesOut)
 
 
 class QuickBalanceNet(BaseModel):
@@ -316,7 +329,8 @@ async def markers_public(
     return markers
 
 
-@router.get("/open-trades", response_model=List[OpenTradeOut])
+# @router.get("/open-trades", response_model=List[OpenTradeOut])
+@router.get("/open-trades", response_model=OpenTradesResponse)
 async def open_trades_public(
     symbol: Optional[str] = Query(None, min_length=1, max_length=64),
     exchange: str = Query(settings.DEFAULT_EXCHANGE),
@@ -376,7 +390,12 @@ async def open_trades_public(
                 status=str(r.status),
             )
         )
-    return out
+    # return out
+    # entry_lines_map = calculate_entry_lines(rows, symbol=symbol)
+    # return OpenTradesResponse(items=out, entry_lines=EntryLinesOut(**entry_lines_map))
+    # Entry line’ları da (LONG/SHORT ortalama giriş) ekleyelim
+    entry_lines_map = calculate_entry_lines(rows, symbol=symbol)
+    return OpenTradesResponse(items=out, entry_lines=EntryLinesOut(**entry_lines_map))
 
 
 @router.get("/recent-trades", response_model=List[TradeOut])

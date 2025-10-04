@@ -6,7 +6,8 @@ import logging
 import httpx
 import uuid
 import asyncio
-import json
+
+# import json
 
 from app.exchanges.common.http.retry import arequest_with_retry
 from app.models import StrategyOpenTrade
@@ -23,7 +24,7 @@ from .settings import (
 )
 from .utils import (
     build_signed_get,
-    build_signed_post,
+    build_signed_post_with_body,
     adjust_quantity,
     set_leverage as _utils_set_leverage,
     get_position_mode,
@@ -49,28 +50,22 @@ __all__ = [
 
 
 def _build_param_rules(position_mode: str, mode: str, side_in: str):
-    """
-    Saf kural fonksiyonu:
-      - one_way + close  → reduceOnly=true, positionSide=None, side=ters
-      - hedge   + open   → reduceOnly yok, positionSide=LONG/SHORT, side=doğru
-      - hedge   + close  → reduceOnly yok, positionSide=LONG/SHORT, side=ters
-      - one_way + open   → reduceOnly yok, positionSide=None, side=doğru
-    Dönen değerler: (reduce_only: bool, position_side: str|None, api_side: 'BUY'|'SELL')
-    """
     pm = (position_mode or "").lower()
     md = (mode or "").lower()
     sd = (side_in or "").lower()
-
     reduce_only = md == "close" and pm != "hedge"
-    if md == "close":
-        api_side = "SELL" if sd == "long" else "BUY"
-    else:
-        api_side = "BUY" if sd == "long" else "SELL"
-
+    api_side = (
+        "Buy"
+        if md != "close" and sd == "long"
+        else (
+            "Sell"
+            if md != "close" and sd == "short"
+            else "Sell" if md == "close" and sd == "long" else "Buy"
+        )
+    )
     position_side = None
     if pm == "hedge":
         position_side = "LONG" if sd == "long" else "SHORT"
-
     return reduce_only, position_side, api_side
 
 
@@ -106,95 +101,58 @@ def build_open_trade_model(
 async def place_order(
     signal_data: WebhookSignal, client_order_id: Optional[str] = None
 ) -> dict:
-    # Hesap modunu süreçte bir kez doğrula/ayarla (async-safe)
-    # Hold aktifse hiç deneme
-    blocked, reason = _GATE.is_blocked()
-    if blocked:
-        return {"success": False, "message": "SAFETY_HOLD: " + reason, "data": {}}
-
-    # Hesap modunu süreçte bir kez doğrula/ayarla (async-safe)
-    await _GATE.ensure_position_mode_once()
-    # ensure sonrası tekrar bak (bu sırada hold açılmış olabilir)
-    blocked, reason = _GATE.is_blocked()
-    if blocked:
-        return {"success": False, "message": "SAFETY_HOLD: " + reason, "data": {}}
-
-    """Bybit V5 testnet üzerinde bir piyasa emri gönderir."""
-    if signal_data.order_type.lower() != "market":
-        raise ValueError("Limit orders are not currently supported by the system.")
-
-    url = BASE_URL + ENDPOINTS["ORDER"]
+    # Binance ile aynı akış: safety gate → params → POST → retCode kontrol
+    endpoint = ENDPOINTS["ORDER"]
+    url = BASE_URL + endpoint
     symbol = signal_data.symbol.upper()
+    order_type = "Market"
     quantity = await adjust_quantity(symbol, signal_data.position_size)
     mode = signal_data.mode or ""
     side_in = signal_data.side or ""
     reduce_only, position_side, api_side = _build_param_rules(
         POSITION_MODE, mode, side_in
     )
-
     params: dict[str, Any] = {
         "category": "linear",
         "symbol": symbol,
-        "side": "Buy" if api_side == "BUY" else "Sell",
-        "orderType": "Market",
-        "qty": str(quantity),
+        "side": api_side,  # 'Buy' | 'Sell'
+        "orderType": order_type,  # 'Market'
+        "qty": quantity,
     }
-
     if reduce_only:
         params["reduceOnly"] = True
-
     if position_side is not None:
-        # Bybit hedge modunda bacak → positionIdx: 1=LONG, 2=SHORT
         params["positionIdx"] = 1 if position_side == "LONG" else 2
-        # Emniyet: hedge modda reduceOnly göndermeyelim
         params.pop("reduceOnly", None)
-
-    # clientOrderId opsiyonel → yoksa servis tarafında üret (idempotency için faydalı)
     if client_order_id:
         params["orderLinkId"] = client_order_id
     else:
         params["orderLinkId"] = f"svc-{uuid.uuid4().hex[:8]}"
-    full_url, headers = await build_signed_post(url, params, recv_window=RECV_WINDOW_MS)
-
+    full_url, headers, body = await build_signed_post_with_body(
+        url, params, recv_window=RECV_WINDOW_MS
+    )
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SHORT) as client:
-            # body = json.dumps(params).encode("utf-8")
-
-            # Gönderilecek gövdeyi kanonik JSON olarak üret (imza ile birebir)
-            body = json.dumps(params, separators=(",", ":"), ensure_ascii=False).encode(
-                "utf-8"
+            response = await arequest_with_retry(
+                client,
+                "POST",
+                full_url,
+                headers=headers,
+                timeout=HTTP_TIMEOUT_SHORT,
+                max_retries=1,
+                retry_on_binance_1021=False,
+                content=body,  # ← imzalanan JSON ile bire bir aynı gövde
             )
-            headers["Content-Type"] = "application/json"
-            # 1. deneme
-            response = await client.post(
-                full_url, headers=headers, content=body, timeout=HTTP_TIMEOUT_SHORT
-            )
-            try:
-                response.raise_for_status()
-            except httpx.HTTPStatusError:
-                # 2. deneme: taze imza/ts ile yeniden hazırla
-                full_url, headers = await build_signed_post(
-                    url, params, recv_window=RECV_WINDOW_LONG_MS
-                )
-                # body = json.dumps(params).encode("utf-8")
-
-                # Gövde ve Content-Type aynı kalsın (kanonik JSON)
-                body = json.dumps(
-                    params, separators=(",", ":"), ensure_ascii=False
-                ).encode("utf-8")
-                headers["Content-Type"] = "application/json"
-                response = await client.post(
-                    full_url, headers=headers, content=body, timeout=HTTP_TIMEOUT_SHORT
-                )
-                response.raise_for_status()
-            data = response.json()
-            # Üst katman sorgulamak isterse kimlikleri net döndür
+            response.raise_for_status()
+            data = response.json() or {}
+            if data.get("retCode") != 0:
+                return {"success": False, "message": data.get("retMsg"), "data": data}
+            oid = (data.get("result") or {}).get("orderId")
             return {
                 "success": True,
                 "data": data,
-                "orderId": (data.get("result") or {}).get("orderId"),
-                "clientOrderId": (data.get("result") or {}).get("orderLinkId")
-                or params.get("orderLinkId"),
+                "orderId": oid,
+                "clientOrderId": params["orderLinkId"],
             }
     except httpx.HTTPStatusError as exc:
         logger.error(
@@ -207,13 +165,9 @@ async def place_order(
 
 
 async def get_position(symbol: str, side: Optional[str] = None) -> dict:
-    """Bybit V5 pozisyon bilgilerini alır."""
-    logger.debug("get_position() → %s", symbol)
-    url = BASE_URL + ENDPOINTS["POSITION_RISK"]
-    sym = (symbol or "").upper()
-
-    params: dict[str, Any] = {"category": "linear", "symbol": sym}
-
+    endpoint = ENDPOINTS["POSITION_RISK"]
+    url = BASE_URL + endpoint
+    params = {"category": "linear", "symbol": symbol.upper()}
     full_url, headers = await build_signed_get(url, params, recv_window=RECV_WINDOW_MS)
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_SHORT) as client:
@@ -224,43 +178,31 @@ async def get_position(symbol: str, side: Optional[str] = None) -> dict:
                 headers=headers,
                 timeout=HTTP_TIMEOUT_SHORT,
                 max_retries=1,
-                rebuild_async=lambda: build_signed_get(
-                    url, params, recv_window=RECV_WINDOW_LONG_MS
-                ),
             )
             response.raise_for_status()
-            data = response.json()
-    except httpx.HTTPStatusError as exc:
-        logger.error(
-            "Position fetch failed (%s): %s %s",
-            sym,
-            exc.response.status_code,
-            exc.response.text,
-        )
+            data = response.json() or {}
+    except Exception as exc:
+        logger.error("Position fetch failed (%s): %s", symbol, exc)
         return {}
-    except (httpx.RequestError, asyncio.TimeoutError) as exc:
-        logger.error("Network error while fetching position %s: %s", sym, exc)
+    if not isinstance(data, dict) or data.get("retCode") != 0:
         return {}
-
-    # Bybit V5: {"result":{"list":[...]}}
-    lst = (data.get("result") or {}).get("list") if isinstance(data, dict) else None
-    rows = lst if isinstance(lst, list) else []
-    if not rows:
-        logger.error("Position for %s not found: %s", sym, data)
+    rows = (data.get("result") or {}).get("list") or []
+    cands = [r for r in rows if str(r.get("symbol") or "").upper() == symbol.upper()]
+    if not cands:
         return {}
-    side_norm = (side or "").strip().lower()
-    if POSITION_MODE == "hedge" and side_norm in ("long", "short"):
-        want_idx = 1 if side_norm == "long" else 2
-        for p in rows:
-            if int(str(p.get("positionIdx", 0))) == want_idx:
-                return p
-    for p in rows:
+    if POSITION_MODE == "hedge" and (side or "").lower() in ("long", "short"):
+        want = "Buy" if side.lower() == "long" else "Sell"
+        for r in cands:
+            if (r.get("side") or "").capitalize() == want:
+                return r
+    # one_way: açık olanı seç
+    for r in cands:
         try:
-            if float(p.get("size", "0")) != 0.0:
-                return p
-        except (ValueError, TypeError):
+            if float(r.get("size") or 0) != 0.0:
+                return r
+        except (TypeError, ValueError):
             pass
-    return rows[0]
+    return cands[0]
 
 
 async def query_order_status(

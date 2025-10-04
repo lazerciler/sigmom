@@ -23,104 +23,72 @@ FUTURES_RECV_WINDOW_MS = settings.FUTURES_RECV_WINDOW_MS
 FUTURES_RECV_WINDOW_LONG_MS = settings.FUTURES_RECV_WINDOW_LONG_MS
 
 # Binance modülleriyle aynı isimleri bekleyen yerler için alias:
-RECV_WINDOW_MS = FUTURES_RECV_WINDOW_MS
-RECV_WINDOW_LONG_MS = FUTURES_RECV_WINDOW_LONG_MS
+RECV_WINDOW_MS = settings.FUTURES_RECV_WINDOW_MS or 5_000
+RECV_WINDOW_LONG_MS = settings.FUTURES_RECV_WINDOW_LONG_MS or 15_000
 
-# # Projede borsaya özel API anahtarları .env'de olmayabilir; testlerde ağa çıkmıyoruz.
-# API_KEY = getattr(settings, f"{EXCHANGE_NAME.upper()}_API_KEY", "") or ""
-# API_SECRET = getattr(settings, f"{EXCHANGE_NAME.upper()}_API_SECRET", "") or ""
-# BASE_URL = "https://api-testnet.bybit.com"
-
-# Settings modelinde alan yoksa AttributeError atmaması için default=None veriyoruz
+# Settings modelinde alan yoksa AttributeError atmasın diye default=None veriyoruz
 API_KEY = getattr(settings, f"{EXCHANGE_NAME.upper()}_API_KEY", None)
 API_SECRET = getattr(settings, f"{EXCHANGE_NAME.upper()}_API_SECRET", None)
+
 BASE_URL = "https://api-testnet.bybit.com"
 
-# Fail fast: anahtar/secret yoksa anlaşılır mesajla uygulamayı durdur.
+POSITION_MODE = "one_way"  # "one_way" or "hedge"
+
+# userTrades aralığı için geriye bakış (ms)
+USERTRADES_LOOKBACK_MS = 120_000  # 60_000 kısa kalabilir bu yüzden 120 önerilir.
+
 if not API_KEY or not API_SECRET:
     raise RuntimeError(
         f"[{EXCHANGE_NAME}] API key/secret eksik. .env dosyasına "
         f"{EXCHANGE_NAME.upper()}_API_KEY ve {EXCHANGE_NAME.upper()}_API_SECRET ekleyin."
     )
 
-POSITION_MODE = "one_way"  # "one_way" or "hedge"
-
-# Hesap tipi: UNIFIED, CONTRACT veya AUTO (önce UNIFIED dener, hata alırsa CONTRACT)
-ACCOUNT_TYPE = (
-    (
-        getattr(settings, f"{EXCHANGE_NAME.upper()}_ACCOUNT_TYPE", None)
-        or getattr(settings, "BYBIT_ACCOUNT_TYPE", None)
-        or "AUTO"
-    )
-    .strip()
-    .upper()
-)
-
-# userTrades aralığı için geriye bakış (ms)
-USERTRADES_LOOKBACK_MS = 120_000  # 60_000 kısa kalabilir bu yüzden 120 önerilir.
-
-# ---- KLINES (public) için UI/Router entegrasyonu ----
-# Router (/api/market/klines) 'tf' paramını kullanır ve burada TF_MAP üzerinden
-# Bybit V5 aralığına çevrilir. Destekli değerler: 1 3 5 15 30 60 120 240 360 720 D W M
+# Bybit v5 'interval' değerleri: 1, 3, 5, 15, 60, 240, D ...
 TF_MAP = {
     "1m": "1",
-    "3m": "3",
     "5m": "5",
     "15m": "15",
-    "30m": "30",
     "1h": "60",
-    "2h": "120",
     "4h": "240",
-    "6h": "360",
-    "12h": "720",
     "1d": "D",
-    "1w": "W",
-    "1M": "M",
 }
 
-
-# Bybit V5 limit üst sınırı
-KLINES_LIMIT_MAX = 1000
-
-# Generic fallback için param anahtarları
-KLINES_PARAMS = {"symbol": "symbol", "interval": "interval", "limit": "limit"}
+KLINES_LIMIT_MAX = 1000  # Bybit v5 limit üstü 1000 (daha fazlasını sayfa sayfa ister)
 
 
-# Router generiği tarafından çağrılır: Bybit V5 paramlarını kur
 def build_klines_params(symbol: str, interval: str, limit: int) -> dict:
-    # GET /v5/market/kline?category=linear&symbol=BTCUSDT&interval=1&limit=200
+    """
+    Router'ın generic çağrısına Bybit'e uygun paramları verir.
+    """
     return {
         "category": "linear",
-        "symbol": symbol,
-        "interval": interval,
-        "limit": int(limit),
+        "symbol": symbol.upper(),
+        # Kısa ve net: tanıdık string geldiyse TF_MAP ile çevir, değilse olduğu gibi gönder.
+        "interval": TF_MAP.get(str(interval).lower(), str(interval).upper()),
+        "limit": min(int(limit), KLINES_LIMIT_MAX),
     }
 
 
-# Router generiği tarafından çağrılır: Bybit V5 cevabını normalize et
-def parse_klines(j):
+def parse_klines(payload: dict):
     """
-    Beklenen: {"retCode":0, "result":{"list":[ [start,open,high,low,close,volume,...], ...]}}
-    UI ms epoch beklediğinden 'start' ms olarak bırakılır.
-    Geri dönüş: list[list] → [ts_ms, o, h, l, c]
+    Bybit v5 /v5/market/kline yanıtını UI'nin beklediği forma çevirir.
+    Dönen: [{t, time, o, h, l, c}, ...] (artan zaman)
     """
-    try:
-        rows = (j or {}).get("result", {}).get("list", []) or []
-    except Exception:
-        return []
+    res = (payload or {}).get("result") or {}
+    rows = res.get("list") or []
     out = []
-    for r in rows:
+    for row in rows:
         try:
-            ts = int(r[0])
-            op = float(r[1])
-            hi = float(r[2])
-            lo = float(r[3])
-            cl = float(r[4])
-            out.append([ts, op, hi, lo, cl])
-        except Exception:
+            ts = int(row[0])
+            o = float(row[1])
+            h = float(row[2])
+            lo = float(row[3])  # 'l' yerine 'lo' → PEP8/E741 fix
+            c = float(row[4])
+        except (ValueError, TypeError, IndexError):
             continue
-    # Bybit genelde yeni→eski verir; grafik için kronolojik sırala
-    out.sort(key=lambda x: x[0])
+        time_s = ts // 1000 if ts > 10**10 else ts
+        out.append({"t": ts, "time": time_s, "o": o, "h": h, "l": lo, "c": c})
+    out.sort(key=lambda x: x["t"])
     return out
 
 
@@ -143,5 +111,4 @@ ENDPOINTS = {
     "POSITION_MODE_GET": "/v5/position/list",
     "LEVERAGE": "/v5/position/set-leverage",
     "INCOME": "/v5/position/closed-pnl",
-    "POSITION_SIDE_DUAL": "/v5/position/switch-mode",  # sadece alias; Binance uyarısını susturur
 }

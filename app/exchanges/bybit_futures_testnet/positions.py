@@ -3,37 +3,62 @@
 # Python 3.9
 
 import httpx
-
-from typing import Optional
-from .settings import (
-    BASE_URL,
-    ENDPOINTS,
-    HTTP_TIMEOUT_LONG,
-    RECV_WINDOW_MS,
-    RECV_WINDOW_LONG_MS,
-)
-from .utils import build_signed_get
+from decimal import Decimal
 from app.exchanges.common.http.retry import arequest_with_retry
+from .settings import BASE_URL, ENDPOINTS, HTTP_TIMEOUT_LONG, RECV_WINDOW_LONG_MS
+from .utils import build_signed_get
+import logging
+
+logger = logging.getLogger(__name__)
 
 
-async def get_open_positions(symbol: Optional[str] = None):
-    """Bybit V5: açık pozisyonları getirir (opsiyonel sembol filtresi)."""
-    url = BASE_URL + ENDPOINTS["POSITION_RISK"]
+def _norm_row(row: dict) -> dict:
+    # Bybit v5: row = {'symbol','size','avgPrice','leverage','unrealisedPnl','side','positionIdx',...}
+    sym = str(row.get("symbol") or "").upper()
+    size = Decimal(str(row.get("size") or "0"))
+    # Binance şeması: short için negatif miktar kullanıyoruz
+    if str(row.get("side") or "").upper() == "SELL":
+        size = -abs(size)
+    return {
+        "symbol": sym,
+        "positionAmt": str(size),  # Binance: string miktar
+        "entryPrice": str(row.get("avgPrice") or "0"),
+        "leverage": str(row.get("leverage") or "0"),
+        "unRealizedProfit": str(row.get("unrealisedPnl") or "0"),
+        # Hedge uyumluluğu için (one_way'da LONG varsayım; SELL gelirse SHORT)
+        "positionSide": "SHORT" if size < 0 else "LONG",
+        # ham veri dursun (debug için)
+        "_raw": row,
+    }
+
+
+async def get_open_positions():
+    """
+    Bybit Futures Testnet'teki açık pozisyonları getirir (tüm semboller).
+    DÖNÜŞ: Binance positionRisk ile aynı şema (list[dict]).
+    """
+    endpoint = ENDPOINTS["POSITION_RISK"]  # /v5/position/list
+    url = BASE_URL + endpoint
     params = {"category": "linear"}
-    if symbol:
-        params["symbol"] = symbol.upper()
-    full_url, headers = await build_signed_get(url, params, recv_window=RECV_WINDOW_MS)
+    full_url, headers = await build_signed_get(
+        url, params, recv_window=RECV_WINDOW_LONG_MS
+    )
+
     async with httpx.AsyncClient(timeout=HTTP_TIMEOUT_LONG) as client:
-        response = await arequest_with_retry(
+        resp = await arequest_with_retry(
             client,
             "GET",
             full_url,
             headers=headers,
             timeout=HTTP_TIMEOUT_LONG,
             max_retries=1,
-            rebuild_async=lambda: build_signed_get(
-                url, params, recv_window=RECV_WINDOW_LONG_MS
-            ),
+            retry_on_binance_1021=False,
         )
-        response.raise_for_status()
-        return response.json()
+        resp.raise_for_status()
+        data = resp.json() or {}
+
+    if not isinstance(data, dict) or data.get("retCode") != 0:
+        logger.error("bybit get_open_positions failed: %s", data)
+        return []
+    rows = (data.get("result") or {}).get("list") or []
+    return [_norm_row(r) for r in rows if isinstance(r, dict)]

@@ -309,7 +309,9 @@
     async function resolveActiveSymbol() {
         // 1) Açık pozisyonlardan
         try {
-            const items = await getJSON(`/api/me/open-trades`);
+//            const items = await getJSON(`/api/me/open-trades`);
+            const payload = await getJSON(`/api/me/open-trades`);
+            const items = Array.isArray(payload) ? payload : (Array.isArray(payload?.items) ? payload.items : []);
             if (Array.isArray(items) && items.length && items[0]?.symbol) {
                 return String(items[0].symbol).toUpperCase();
             }
@@ -397,8 +399,11 @@
 
         // (İlk event’lerde yeniden çizimi önlemek için) "son durum"u önceden oku
         try {
-            const ot = await getJSON('/api/me/open-trades');
-            _lastOpenCount = Array.isArray(ot) ? ot.length : 0;
+//            const ot = await getJSON('/api/me/open-trades');
+//            _lastOpenCount = Array.isArray(ot) ? ot.length : 0;
+            const otPayload = await getJSON('/api/me/open-trades');
+            const otItems = Array.isArray(otPayload) ? otPayload : (Array.isArray(otPayload?.items) ? otPayload.items : []);
+            _lastOpenCount = Array.isArray(otItems) ? otItems.length : 0;
         } catch {}
         try {
             const rt = await getJSON('/api/me/recent-trades?limit=200');

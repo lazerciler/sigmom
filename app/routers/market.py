@@ -69,30 +69,6 @@ def _get_exchange_settings(ex_override: Optional[str] = None):
     )
 
 
-# def _tf_to_minutes(val):
-#     """'15m'→15, '1h'→60, '1d'→1440, '1w'→10080 | int ise aynen döner."""
-#     if val is None:
-#         return None
-#     if isinstance(val, int):
-#         return val
-#     s = str(val).strip().lower()
-#     if s.endswith("m"):
-#         return int(s[:-1])
-#     if s.endswith("h"):
-#         return int(s[:-1]) * 60
-#     if s.endswith("d"):
-#         return int(s[:-1]) * 1440
-#     if s.endswith("w"):
-#         return int(s[:-1]) * 10080
-#     # doğrudan sayı verilmiş olabilir
-#     try:
-#         return int(s)
-#     except (ValueError, TypeError):
-#         return None
-# Not: TF dönüşümü, borsa tarafındaki TF_MAP ile çözümlendiği için
-# _tf_to_minutes yardımcı fonksiyonuna artık ihtiyaç yok.
-
-
 def _normalize(data):
     out = []
 
@@ -139,8 +115,11 @@ async def klines(
     symbol: str = Query(..., min_length=3, max_length=24),  # ← zorunlu
     tf: str = Query("15m"),
     limit: int = Query(500, ge=1, le=1500),
+    # hem "exchange" hem de "ex" ile çalışsın:
     ex: Optional[str] = Query(
-        None, description="Exchange override; None → DEFAULT_EXCHANGE"
+        None,
+        alias="exchange",
+        description="Exchange override; None → DEFAULT_EXCHANGE",
     ),
 ):
     symbol = symbol.upper()
@@ -166,15 +145,23 @@ async def klines(
                 status_code=500, detail="build_klines_params invalid return"
             )
     else:
+        # params = {
+        #     p.get("symbol", "symbol"): symbol,
+        #     p.get("interval", "interval"): interval_val,
+        #     p.get("limit", "limit"): min(int(limit), limit_max),
+        # }
         params = {
-            p.get("symbol", "symbol"): symbol,
             p.get("interval", "interval"): interval_val,
             p.get("limit", "limit"): min(int(limit), limit_max),
         }
-
+        # Eğer path içinde {symbol} YOKSA, sembolü query param olarak ekle
+        if "{symbol}" not in (path or ""):
+            params[p.get("symbol", "symbol")] = symbol
     try:
+        # Path {symbol} içeriyorsa formatla
+        endpoint = path.format(symbol=symbol) if "{symbol}" in path else path
         async with httpx.AsyncClient(base_url=base, timeout=10.0) as client:
-            r = await client.get(path, params=params)
+            r = await client.get(endpoint, params=params)
             r.raise_for_status()
 
             j = r.json()

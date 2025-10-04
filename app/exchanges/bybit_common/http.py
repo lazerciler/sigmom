@@ -47,19 +47,29 @@ class BybitHttp:
     # ---- internals ----
     def _ts(self) -> int:
         try:
-            return int(self.get_server_time())
+            ts = int(self.get_server_time())
+            # saniye gelirse ms'e yükselt (Bybit V5 ms ister)
+            if ts < 10**12:
+                ts *= 1000
+            return ts
         except Exception:
             return int(time.time() * 1000)
 
     @staticmethod
     def _sorted_query(params: Mapping) -> str:
-        # boş değerleri "" yap, sıralı & URL-encode birleşim
-        items = sorted((k, "" if v is None else str(v)) for k, v in params.items())
+        # None parametreleri tamamen dışarıda bırak; kalanları sıralı & URL-encode birleştir
+        items = sorted((k, str(v)) for k, v in (params or {}).items() if v is not None)
         return "&".join(f"{k}={quote(v, safe='')}" for k, v in items)
 
     @staticmethod
     def _json_payload(params: Mapping) -> str:
-        return json.dumps(dict(params or {}), separators=(",", ":"), ensure_ascii=False)
+        # KANONİK JSON: anahtarlar sıralı olmalı; imza bu string'e göre hesaplanır
+        return json.dumps(
+            dict(params or {}),
+            separators=(",", ":"),
+            sort_keys=True,
+            ensure_ascii=False,
+        )
 
     def _sign(
         self, recv_ms: int, payload: str, ts: Optional[int] = None
@@ -75,9 +85,10 @@ class BybitHttp:
         hdr = {
             "X-BAPI-API-KEY": self.api_key,
             "X-BAPI-TIMESTAMP": str(ts),
-            "X-BAPI-SIGN": sig,
             "X-BAPI-RECV-WINDOW": str(int(recv_ms)),
+            "X-BAPI-SIGN": sig,
             "X-BAPI-SIGN-TYPE": "2",
+            "Content-Type": "application/json",
         }
         if self.extra_headers:
             hdr.update(self.extra_headers())
@@ -98,6 +109,24 @@ class BybitHttp:
         )
         return full_url, headers
 
+    # Yeni: POST için aynı anda (url, headers, body_bytes) döndür.
+    # Var olan build_post'u bozmamak için ayrı bir yardımcı verdik.
+    def build_post_with_body(
+        self, endpoint: str, params: Optional[Dict] = None, window: str = "short"
+    ) -> Tuple[str, Dict, bytes]:
+        payload: Dict = dict(params or {})
+        if self.on_sign_params:
+            payload = self.on_sign_params(payload)
+        body = self._json_payload(payload)  # KANONİK JSON (sort_keys)
+        sig, ts = self._sign(
+            self.recv_long if window == "long" else self.recv_short, body
+        )
+        full_url = f"{self.base_url}{endpoint}"
+        headers = self._headers(
+            ts, sig, self.recv_long if window == "long" else self.recv_short
+        )
+        return full_url, headers, body.encode("utf-8")
+
     def build_post(
         self, endpoint: str, params: Optional[Dict] = None, window: str = "short"
     ) -> Tuple[str, Dict]:
@@ -112,6 +141,4 @@ class BybitHttp:
         headers = self._headers(
             ts, sig, self.recv_long if window == "long" else self.recv_short
         )
-        # Content-Type sadece gövdeli isteklerde (POST/PUT/PATCH) gereklidir.
-        headers["Content-Type"] = "application/json"
         return full_url, headers

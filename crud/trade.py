@@ -318,6 +318,10 @@ async def close_open_trade_and_record(
         return True
 
     except Exception as e:
+        try:
+            await db.rollback()
+        except Exception as rollback_exc:  # noqa: BLE001
+            LOGGER.exception("[close-fail-rollback] %s", rollback_exc)
         # ORM alanlarına dokunmadan snapshot ile logla → MissingGreenlet’i engeller
         LOGGER.error(
             "[close-fail] id=%s sym=%s side=%s fm=%s exch=%s err=%s",
@@ -380,7 +384,11 @@ async def mark_trade_as_failed(db: AsyncSession, open_trade: StrategyOpenTrade):
 
 
 async def verify_pending_trades_for_execution(
-    db: AsyncSession, execution, max_retries: int = 3
+    # db: AsyncSession, execution, max_retries: int = 3
+    db: AsyncSession,
+    execution,
+    exchange_name: str,
+    max_retries: int = 3,
 ):
     """
     Pending durumdaki açık pozisyonları exchange ile doğrular.
@@ -389,11 +397,22 @@ async def verify_pending_trades_for_execution(
     """
     verifier_logger = LOGGER
 
+    exchange = (exchange_name or "").strip()
+
     result = await db.execute(
-        select(StrategyOpenTrade).where(StrategyOpenTrade.status == "pending")
+        # select(StrategyOpenTrade).where(StrategyOpenTrade.status == "pending")
+        select(StrategyOpenTrade).where(
+            StrategyOpenTrade.status == "pending",
+            StrategyOpenTrade.exchange == exchange,
+        )
     )
     pending_trades = result.scalars().all()
-    verifier_logger.info("[loop] %s pending trade found", len(pending_trades))
+    # verifier_logger.info("[loop] %s pending trade found", len(pending_trades))
+    verifier_logger.info(
+        "[loop] %s pending trade found for %s",
+        len(pending_trades),
+        exchange if exchange else "<empty>",
+    )
 
     for open_trade in pending_trades:
         now = datetime.utcnow()

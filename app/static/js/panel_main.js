@@ -78,27 +78,28 @@
         const wantLong = Number.isFinite(map?.long) ? Number(map.long) : null;
         const wantShort = Number.isFinite(map?.short) ? Number(map.short) : null;
 
-        // Aynı/çok yakınsa küçük bir epsilon ile ayır
-        if (wantLong != null && wantShort != null) {
-            const base = Number.isFinite(wantLong) ? wantLong : wantShort;
-            const decs = (() => {
-                const s = String(base);
-                const i = s.indexOf('.');
-                return i === -1 ? 0 : Math.min(6, s.length - i - 1);
-            })();
-            const step = Math.pow(10, -decs) || 0.01;
-            if (Math.abs(wantLong - wantShort) < step / 2) {
-                // LONG'u yarım adım yukarı kaydır
-                map.long = wantLong + step * 0.5;
-            }
-        }
-
-        // >>> ÇİZİM İÇİN GÜNCELLENEN DEĞERLERİ KULLAN <<<
-        const drawLong = Number.isFinite(map?.long) ? Number(map.long) : wantLong;
-        const drawShort = Number.isFinite(map?.short) ? Number(map.short) : wantShort;
-
-        // Long
-        if (drawLong != null) setEntryLine('long', drawLong);
+//        // Aynı/çok yakınsa küçük bir epsilon ile ayır
+//        if (wantLong != null && wantShort != null) {
+//            const base = Number.isFinite(wantLong) ? wantLong : wantShort;
+//            const decs = (() => {
+//                const s = String(base);
+//                const i = s.indexOf('.');
+//                return i === -1 ? 0 : Math.min(6, s.length - i - 1);
+//            })();
+//            const step = Math.pow(10, -decs) || 0.01;
+//            if (Math.abs(wantLong - wantShort) < step / 2) {
+//                // LONG'u yarım adım yukarı kaydır
+//                map.long = wantLong + step * 0.5;
+//            }
+//        }
+//
+//        // >>> ÇİZİM İÇİN GÜNCELLENEN DEĞERLERİ KULLAN <<<
+//        const drawLong = Number.isFinite(map?.long) ? Number(map.long) : wantLong;
+//        const drawShort = Number.isFinite(map?.short) ? Number(map.short) : wantShort;
+//
+//        // Long
+//        if (drawLong != null) setEntryLine('long', drawLong);
+        if (wantLong != null) setEntryLine('long', wantLong);
         else {
             try {
                 entryLines.long && candle.removePriceLine(entryLines.long);
@@ -106,8 +107,9 @@
             entryLines.long = null;
         }
 
-        // Short
-        if (drawShort != null) setEntryLine('short', drawShort);
+//        // Short
+//        if (drawShort != null) setEntryLine('short', drawShort);
+        if (wantShort != null) setEntryLine('short', wantShort);
         else {
             try {
                 entryLines.short && candle.removePriceLine(entryLines.short);
@@ -131,6 +133,19 @@
     // geriye dönük: tek çizgi temizleme çağrıları boşa düşmesin
     function clearEntryLine() {
         clearEntryLines();
+    }
+
+    function unwrapOpenTradesPayload(payload) {
+        if (Array.isArray(payload)) {
+            return {
+                items: payload,
+                entryLines: null
+            };
+        }
+        return {
+            items: Array.isArray(payload?.items) ? payload.items : [],
+            entryLines: payload?.entry_lines ?? null
+        };
     }
 
     // Tek noktadan render: durum değişmedikçe DOM'a dokunmaz (animasyon kesilmez)
@@ -712,7 +727,7 @@
                 // Değişiklik tespit edildi → sert yenile (tüm cache ve state temizlensin)
                 window.location.reload();
                 // Eşitse bile yerel durumu güncel tutalım
-                if (ex) LAST_KNOWN_EXCHANGE = ex;
+//                if (ex) LAST_KNOWN_EXCHANGE = ex;
             }
         } catch {
             /* sessiz geç */
@@ -760,7 +775,9 @@
                 }
             });
             if (r.ok) {
-                const items = await r.json();
+//                const items = await r.json();
+                const payload = await r.json();
+                const { items } = unwrapOpenTradesPayload(payload);
                 if (Array.isArray(items) && items.length) {
                     const sym = String(items[0]?.symbol || '').toUpperCase();
                     if (sym) {
@@ -885,8 +902,11 @@
                 cache: 'no-store'
             });
             if (r.ok) {
-                const arr = await r.json();
-                arr?.forEach(t => t?.symbol && symbols.push(String(t.symbol).toUpperCase()));
+//                const arr = await r.json();
+//                arr?.forEach(t => t?.symbol && symbols.push(String(t.symbol).toUpperCase()));
+                const payload = await r.json();
+                const { items } = unwrapOpenTradesPayload(payload);
+                items?.forEach(t => t?.symbol && symbols.push(String(t.symbol).toUpperCase()));
             }
         } catch {}
         // benzersiz + sırala
@@ -1005,8 +1025,11 @@
                 }
             });
             if (r2.ok) {
-                const arr = await r2.json();
-                arr.forEach(t => list.push(String(t.symbol || '').toUpperCase()));
+//                const arr = await r2.json();
+//                arr.forEach(t => list.push(String(t.symbol || '').toUpperCase()));
+                const payload = await r2.json();
+                const { items } = unwrapOpenTradesPayload(payload);
+                items.forEach(t => list.push(String(t.symbol || '').toUpperCase()));
             }
         } catch {}
 
@@ -1418,9 +1441,12 @@
                 cache: 'no-store'
             });
             if (r.ok) {
-                const j = await r.json();
-                const arr = Array.isArray(j) ? j : (Array.isArray(j.items) ? j.items : []);
-                const row = arr.find(t => String(t.symbol || '').toUpperCase() === symbol);
+//                const j = await r.json();
+//                const arr = Array.isArray(j) ? j : (Array.isArray(j.items) ? j.items : []);
+//                const row = arr.find(t => String(t.symbol || '').toUpperCase() === symbol);
+                const payload = await r.json();
+                const { items } = unwrapOpenTradesPayload(payload);
+                const row = items.find(t => String(t.symbol || '').toUpperCase() === symbol);
                 if (row) {
                     // side yoksa miktar işaretinden çıkar
                     const s = String(row.side || '').toLowerCase();
@@ -1536,7 +1562,11 @@
         try {
             // cache: 'no-store' → tarayıcı önbelleğini baypas et, eksiltmeler anında gelsin
             const ex = getSelectedExchange();
-            const res = await fetch(`/api/me/open-trades?limit=${RECENT_TRADES_LIMIT}&exchange=${encodeURIComponent(ex)}`, {
+//            const res = await fetch(`/api/me/open-trades?limit=${RECENT_TRADES_LIMIT}&exchange=${encodeURIComponent(ex)}`, {
+            const qs = new URLSearchParams();
+            qs.set('limit', RECENT_TRADES_LIMIT);
+            if (activeSymbol) qs.set('symbol', String(activeSymbol || '').toUpperCase());
+            const res = await fetch(`/api/me/open-trades?${qs.toString()}&exchange=${encodeURIComponent(ex)}`, {
                 credentials: 'include',
                 cache: 'no-store',
                 headers: {
@@ -1545,7 +1575,9 @@
             });
 
             if (!res.ok) throw new Error('api');
-            const items = await res.json();
+//            const items = await res.json();
+            const payload = await res.json();
+            const { items, entryLines } = unwrapOpenTradesPayload(payload);
             OPEN_TRADES_CACHE = Array.isArray(items) ? items : [];
             // Sembol seçiciyi canlı duruma göre güncelle
             try {
@@ -1563,7 +1595,9 @@
             try {
                 document.dispatchEvent(new CustomEvent('sig:open-trades', {
                     detail: {
-                        items
+//                        items
+                        items,
+                        entryLines
                     }
                 }));
             } catch {}
@@ -1672,47 +1706,48 @@
                 return items;
             }
             try {
-                const act = String(activeSymbol || '').toUpperCase();
-                const rows = Array.isArray(items) ?
-                    items.filter(t => String(t?.symbol || '').toUpperCase() === act) : [];
-                // En yeni kaydı bul (timestamp/alternatif alanlar; epoch ya da ISO destekli)
-                const tsOf = (t) => parseTs(t?.timestamp) ?? parseTs(t?.opened_at) ?? 0;
-                // Bir kayıttan "entry" seçme yardımcıları
-                const pickFrom = (t) => {
-                    const cand = [
-                        t?.avg_entry_price, t?.avg_price, t?.entry_avg, t?.entry_price
-                    ];
-                    const v = cand.find(v => v != null && v !== '');
-                    return Number(v);
-                };
-                // Hedge: her bacak için en yeni açık kaydı al
-                const perSide = {
-                    long: null,
-                    short: null
-                };
-                if (rows.length) {
-                    const longRows = rows.filter(r => String(r?.side || '').toLowerCase() === 'long').sort((a, b) => tsOf(a) - tsOf(b));
-                    const shortRows = rows.filter(r => String(r?.side || '').toLowerCase() === 'short').sort((a, b) => tsOf(a) - tsOf(b));
-                    if (longRows.length) {
-                        let v = pickFrom(longRows[longRows.length - 1]);
-                        if (!Number.isFinite(v))
-                            for (const r of [...longRows].reverse()) {
-                                v = pickFrom(r);
-                                if (Number.isFinite(v)) break;
-                            }
-                        if (Number.isFinite(v)) perSide.long = v;
-                    }
-                    if (shortRows.length) {
-                        let v = pickFrom(shortRows[shortRows.length - 1]);
-                        if (!Number.isFinite(v))
-                            for (const r of [...shortRows].reverse()) {
-                                v = pickFrom(r);
-                                if (Number.isFinite(v)) break;
-                            }
-                        if (Number.isFinite(v)) perSide.short = v;
-                    }
-                }
-                if (perSide.long != null || perSide.short != null) updateEntryLines(perSide);
+//                const act = String(activeSymbol || '').toUpperCase();
+//                const rows = Array.isArray(items) ?
+//                    items.filter(t => String(t?.symbol || '').toUpperCase() === act) : [];
+//                // En yeni kaydı bul (timestamp/alternatif alanlar; epoch ya da ISO destekli)
+//                const tsOf = (t) => parseTs(t?.timestamp) ?? parseTs(t?.opened_at) ?? 0;
+//                // Bir kayıttan "entry" seçme yardımcıları
+//                const pickFrom = (t) => {
+//                    const cand = [
+//                        t?.avg_entry_price, t?.avg_price, t?.entry_avg, t?.entry_price
+//                    ];
+//                    const v = cand.find(v => v != null && v !== '');
+//                    return Number(v);
+//                };
+//                // Hedge: her bacak için en yeni açık kaydı al
+//                const perSide = {
+//                    long: null,
+//                    short: null
+//                };
+//                if (rows.length) {
+//                    const longRows = rows.filter(r => String(r?.side || '').toLowerCase() === 'long').sort((a, b) => tsOf(a) - tsOf(b));
+//                    const shortRows = rows.filter(r => String(r?.side || '').toLowerCase() === 'short').sort((a, b) => tsOf(a) - tsOf(b));
+//                    if (longRows.length) {
+//                        let v = pickFrom(longRows[longRows.length - 1]);
+//                        if (!Number.isFinite(v))
+//                            for (const r of [...longRows].reverse()) {
+//                                v = pickFrom(r);
+//                                if (Number.isFinite(v)) break;
+//                            }
+//                        if (Number.isFinite(v)) perSide.long = v;
+//                    }
+//                    if (shortRows.length) {
+//                        let v = pickFrom(shortRows[shortRows.length - 1]);
+//                        if (!Number.isFinite(v))
+//                            for (const r of [...shortRows].reverse()) {
+//                                v = pickFrom(r);
+//                                if (Number.isFinite(v)) break;
+//                            }
+//                        if (Number.isFinite(v)) perSide.short = v;
+//                    }
+//                }
+//                if (perSide.long != null || perSide.short != null) updateEntryLines(perSide);
+                if (entryLines) updateEntryLines(entryLines);
                 else clearEntryLines();
             } catch {}
             return items;
@@ -1727,7 +1762,9 @@
             try {
                 document.dispatchEvent(new CustomEvent('sig:open-trades', {
                     detail: {
-                        items: []
+//                        items: []
+                        items: [],
+                        entryLines: null
                     }
                 }));
             } catch {}
@@ -1899,6 +1936,7 @@
 
     // Kullanıcı TF seçtiğinde: klTf güncellenir, seri temizlenir, klines+markers yeni TF ile yüklenir
     async function setTimeframe(tf) {
+    clearEntryLines();
         if (!tf || tf === klTf) return;
         klTf = tf;
         klLimit = 1000;
@@ -2039,7 +2077,7 @@
                     symbol: SYM
                 });
                 const ex = getSelectedExchange(activeSymbol);
-                if (ex) qs.set('exchange', ex);
+                if (ex) qs.set('exchange', ex); // # ex exchange değil
                 const resp = await fetch('/api/me/quick-balance?' + qs.toString(), {
                     credentials: 'include',
                     cache: 'no-store',

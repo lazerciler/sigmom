@@ -13,13 +13,24 @@ EXCHANGE_NAME = "mexc_futures"
 HTTP_TIMEOUT_SYNC = settings.HTTP_TIMEOUT_SYNC
 HTTP_TIMEOUT_SHORT = settings.HTTP_TIMEOUT_SHORT
 HTTP_TIMEOUT_LONG = settings.HTTP_TIMEOUT_LONG
+FUTURES_RECV_WINDOW_MS = settings.FUTURES_RECV_WINDOW_MS
+FUTURES_RECV_WINDOW_LONG_MS = settings.FUTURES_RECV_WINDOW_LONG_MS
+
+# Recv-window (MEXC header’da, ms; doküman max 60s önerir)
+RECV_WINDOW_MS = settings.FUTURES_RECV_WINDOW_MS or 5_000
+RECV_WINDOW_LONG_MS = settings.FUTURES_RECV_WINDOW_LONG_MS or 15_000
 
 # Settings modelinde alan yoksa AttributeError atmasın diye default=None veriyoruz
 API_KEY = getattr(settings, f"{EXCHANGE_NAME.upper()}_API_KEY", None)
 API_SECRET = getattr(settings, f"{EXCHANGE_NAME.upper()}_API_SECRET", None)
 
-# MEXC futures base URL
 BASE_URL = "https://contract.mexc.com"
+
+# Proje genel tutarlılık: one_way | hedge (MEXC: 1=hedge, 2=one-way)
+POSITION_MODE = "one_way"
+
+# userTrades aralığı için geriye bakış (ms)
+USERTRADES_LOOKBACK_MS = 120_000  # 60_000 kısa kalabilir bu yüzden 120 önerilir.
 
 if not API_KEY or not API_SECRET:
     raise RuntimeError(
@@ -27,14 +38,15 @@ if not API_KEY or not API_SECRET:
         f"{EXCHANGE_NAME.upper()}_API_KEY ve {EXCHANGE_NAME.upper()}_API_SECRET ekleyin."
     )
 
-# Proje genel tutarlılık: one_way | hedge (MEXC: 1=hedge, 2=one-way)
-POSITION_MODE = "one_way"
+# Router'ın beklediği path/param sözleşmesi:
+# MEXC klines: GET /api/v1/contract/kline/{symbol}?interval=Min15&limit=200
+KLINES_PATH = "/api/v1/contract/kline/{symbol}"
+# KLINES_PARAMS = {"interval": None, "limit": None}
+KLINES_PARAMS = {"symbol": "symbol", "interval": "interval", "limit": "limit"}
 
-# Recv-window (MEXC header’da, ms; doküman max 60s önerir)
-RECV_WINDOW_MS = settings.FUTURES_RECV_WINDOW_MS or 5_000
-RECV_WINDOW_LONG_MS = settings.FUTURES_RECV_WINDOW_LONG_MS or 15_000
+# Router limit emniyeti (MEXC max 1000)
+KLINES_LIMIT_MAX = 1000
 
-# Kline haritaları (router 'tf' → borsa interval)
 TF_MAP = {
     "1m": "Min1",
     "5m": "Min5",
@@ -49,73 +61,120 @@ TF_MAP = {
 }
 
 
-# Router limit emniyeti (MEXC max 1000)
-KLINES_LIMIT_MAX = 1000
-
-# Router'ın beklediği path/param sözleşmesi:
-# MEXC klines: GET /api/v1/contract/kline/{symbol}?interval=Min15&limit=200
-KLINES_PATH = "/api/v1/contract/kline/{symbol}"
-KLINES_PARAMS = {"symbol": "symbol", "interval": "interval", "limit": "limit"}
-
-
 # Sembol dönüştürücü (BTCUSDT → BTC_USDT)
-def normalize_symbol(sym: str) -> str:
-    s = (sym or "").upper().replace("-", "_").replace(":", "_")
-    if s.endswith(".P"):
-        s = s[:-2]
-    if "_" not in s and len(s) >= 6:
-        s = s[:-4] + "_" + s[-4:]
+# def normalize_symbol(sym: str) -> str:
+#     s = (sym or "").upper().replace("-", "_").replace(":", "_")
+#     if s.endswith(".P"):
+#         s = s[:-2]
+#     if "_" not in s and len(s) >= 6:
+#         s = s[:-4] + "_" + s[-4:]
+#     return s
+
+
+# def normalize_symbol(sym: str) -> str:
+#     """
+#     MEXC futures klines endpoint'i 'BTC_USDT' gibi alt çizgili sembol ister.
+#     'BTCUSDT' gelirse 'BTC_USDT' yap.
+#     """
+#     if "_" in sym:
+#         return sym
+#     if sym.endswith("USDT"):
+#         return f"{sym[:-4]}_USDT"
+#     if sym.endswith("USD"):
+#         return f"{sym[:-3]}_USD"
+#     return sym
+
+
+def normalize_symbol(symbol: str) -> str:
+    """
+    'BTCUSDT' → 'BTC_USDT' biçimine çevir.
+    Zaten 'BTC_USDT' ise aynen döndür.
+    """
+    s = symbol.upper()
+    if "_" in s:
+        return s
+    # basit iki parça ayırıcı: son 3-4 harfi quote kabul et
+    for q in ("USDT", "USD", "USDC", "BUSD"):
+        if s.endswith(q):
+            return f"{s[:-len(q)]}_{q}"
     return s
 
 
-# Kline çıktısını router'ın _normalize formatına çevir
-def parse_klines(j):
-    # MEXC bazen {"data":[...]} veya {"kline":[...]} döndürebilir; bazen doğrudan liste.
-    data = j.get("data") if isinstance(j, dict) else j
-    if isinstance(data, dict) and "kline" in data:
-        data = data["kline"]
-    out = []
-    if isinstance(data, list):
-        for it in data:
-            if isinstance(it, (list, tuple)) and len(it) >= 5:
-                # # [t,o,h,l,c,(v...)]
-                # out.append({"t": int(it[0]), "o": float(it[1]), "h": float(it[2]),
-                #             "l": float(it[3]), "c": float(it[4])})
+def build_klines_params(symbol: str, tf: str, limit: int):
+    """
+    Path’te {symbol} olduğu için burada sembol göndermiyoruz.
+    """
+    return {"interval": TF_MAP.get(tf, tf), "limit": int(limit)}
 
-                # [t,o,h,l,c,(v...)]  → t: saniye/ms olabilir
-                t_raw = int(it[0])
-                t_ms = t_raw * 1000 if t_raw < 10**12 else t_raw  # <1e12 ise saniyedir
-                out.append(
-                    {
-                        "t": t_ms,
-                        "o": float(it[1]),
-                        "h": float(it[2]),
-                        "l": float(it[3]),
-                        "c": float(it[4]),
-                    }
-                )
-            elif isinstance(it, dict):
-                t = it.get("t") or it.get("time") or it.get("T") or it.get("ts")
-                op = it.get("o") or it.get("open")
-                hi = it.get("h") or it.get("high")
-                lo = it.get("l") or it.get("low")
-                cl = it.get("c") or it.get("close")
-                if None not in (t, op, hi, lo, cl):
-                    t_raw = int(t)
-                    t_ms = t_raw * 1000 if t_raw < 10**12 else t_raw
-                    out.append(
-                        {
-                            "t": t_ms,
-                            "o": float(op),
-                            "h": float(hi),
-                            "l": float(lo),
-                            "c": float(cl),
-                        }
-                    )
-    # return out
-    # grafikler artan zamana göre ister
-    out.sort(key=lambda row: row["t"])
-    return out
+
+def parse_klines(payload):
+    """
+    MEXC futures kline cevabı genellikle:
+      {"success": true, "code": 0, "data": [{"t":..., "o":..., "h":..., "l":..., "c":...}, ...]}
+    veya doğrudan liste dönebilir.
+    """
+    if isinstance(payload, dict):
+        data = payload.get("data") or payload.get("result") or payload.get("rows")
+        return data if isinstance(data, list) else []
+    return payload
+
+
+# def build_klines_params(symbol: str, interval: str, limit: int) -> dict:
+#     """
+#     Router interval'ı zaten haritalayıp (ör. 15m→Min15) gönderiyor.
+#     Burada tekrar TF_MAP'e sokup 'Min15' gibi değerleri bozmuyoruz.
+#     """
+#     return {"interval": interval, "limit": limit}
+
+
+# # Kline çıktısını router'ın _normalize formatına çevir
+# def parse_klines(j):
+#     # MEXC bazen {"data":[...]} veya {"kline":[...]} döndürebilir; bazen doğrudan liste.
+#     data = j.get("data") if isinstance(j, dict) else j
+#     if isinstance(data, dict) and "kline" in data:
+#         data = data["kline"]
+#     out = []
+#     if isinstance(data, list):
+#         for it in data:
+#             if isinstance(it, (list, tuple)) and len(it) >= 5:
+#                 # # [t,o,h,l,c,(v...)]
+#                 # out.append({"t": int(it[0]), "o": float(it[1]), "h": float(it[2]),
+#                 #             "l": float(it[3]), "c": float(it[4])})
+#
+#                 # [t,o,h,l,c,(v...)]  → t: saniye/ms olabilir
+#                 t_raw = int(it[0])
+#                 t_ms = t_raw * 1000 if t_raw < 10**12 else t_raw  # <1e12 ise saniyedir
+#                 out.append(
+#                     {
+#                         "t": t_ms,
+#                         "o": float(it[1]),
+#                         "h": float(it[2]),
+#                         "l": float(it[3]),
+#                         "c": float(it[4]),
+#                     }
+#                 )
+#             elif isinstance(it, dict):
+#                 t = it.get("t") or it.get("time") or it.get("T") or it.get("ts")
+#                 op = it.get("o") or it.get("open")
+#                 hi = it.get("h") or it.get("high")
+#                 lo = it.get("l") or it.get("low")
+#                 cl = it.get("c") or it.get("close")
+#                 if None not in (t, op, hi, lo, cl):
+#                     t_raw = int(t)
+#                     t_ms = t_raw * 1000 if t_raw < 10**12 else t_raw
+#                     out.append(
+#                         {
+#                             "t": t_ms,
+#                             "o": float(op),
+#                             "h": float(hi),
+#                             "l": float(lo),
+#                             "c": float(cl),
+#                         }
+#                     )
+#     # return out
+#     # grafikler artan zamana göre ister
+#     out.sort(key=lambda row: row["t"])
+#     return out
 
 
 # Endpoints (sadece path)
